@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Clear Cache</title>
+</head>
+
+<body>
+    <h1>Cache Cleared!</h1>
+    <script>
+        // Clear all caches
+        if ('caches' in window) {
+            caches.keys().then(function (names) {
+                for (let name of names) caches.delete(name);
+            });
+        }
+        // Clear localStorage
+        localStorage.clear();
+        // Redirect to main page after 1 second
+        setTimeout(() => {
+            window.location.href = '/';
+        }, 1000);
+    </script>
+</body>
+
+</html>

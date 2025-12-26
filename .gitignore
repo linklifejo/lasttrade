@@ -1,0 +1,85 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+bin/
+include/
+pylatexenc/
+
+# SQLite Database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+# Specific for this project
+trading.db
+
+# Logs
+logs/
+*.log
+startup_error.txt
+
+# Secrets & Keys (Security)
+api_token*.txt
+api_token_time*.txt
+settings.json
+*.key
+*.pem
+*.token
+
+# Backups & Migrations
+*.backup
+*.migrated_to_db
+*.old
+*.tmp
+
+# Common Data Files (Ignore if they contain user specific data)
+status.json
+status_MOCK.json
+status_REAL.json
+status_PAPER.json
+account.json
+prices.json
+stocks.json
+orders.json
+held_times.json
+daily_asset_*.json
+sell_log.json
+trading_log.json
+web_command.json
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Antigravity / Agent Specific (Optional, but kept local by default)
+# .cursorrules
+# .gemini/

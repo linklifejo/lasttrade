@@ -1,0 +1,14 @@
+/* Ensure trading history table shows all rows without scrolling */
+#trading-history-section {
+    min-height: 600px;
+}
+
+#sell-table {
+    width: 100%;
+    table-layout: auto;
+}
+
+#sell-table tbody {
+    max-height: none !important;
+    overflow-y: visible !important;
+}

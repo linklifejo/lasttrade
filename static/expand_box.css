@@ -1,0 +1,22 @@
+/* Expand Trading History Section Box */
+.sell-history-section,
+.report-section,
+#trading-history-section {
+    min-height: 800px !important;
+    max-height: none !important;
+    height: auto !important;
+}
+
+#view-reports {
+    overflow-y: auto !important;
+    max-height: calc(100vh - 100px) !important;
+}
+
+section.card {
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+#sell-table {
+    min-height: 400px;
+}

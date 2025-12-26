@@ -1,0 +1,215 @@
+/* Revamped Premium Settings UI - Glassmorphism & Modern Aesthetic */
+
+:root {
+    --premium-purple: #8b5cf6;
+    --premium-indigo: #6366f1;
+    --premium-glass: rgba(30, 30, 50, 0.4);
+    --premium-border: rgba(255, 255, 255, 0.1);
+    --premium-text: #f8fafc;
+    --premium-desc: #94a3b8;
+}
+
+#view-settings {
+    padding: 10px 15px;
+    background: radial-gradient(circle at top right, rgba(139, 92, 246, 0.1), transparent),
+        radial-gradient(circle at bottom left, rgba(99, 102, 241, 0.1), transparent);
+    min-height: 100vh;
+}
+
+.settings-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 12px;
+    margin-top: 10px;
+}
+
+@media (min-width: 1200px) {
+    .settings-container {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+.glass-card {
+    background: var(--premium-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--premium-border);
+    border-radius: 16px;
+    padding: 15px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+}
+
+.glass-card:hover {
+    box-shadow: 0 15px 40px rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.3);
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    border-bottom: 1px solid var(--premium-border);
+    padding-bottom: 10px;
+}
+
+.category-icon {
+    font-size: 1.4rem;
+    filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.5));
+}
+
+.card-header h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--premium-text);
+    margin: 0;
+}
+
+.settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    transition: background 0.2s ease;
+}
+
+.setting-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.setting-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+}
+
+.setting-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--premium-text);
+}
+
+.setting-desc {
+    font-size: 0.75rem;
+    color: var(--premium-desc);
+}
+
+/* Premium Form Elements */
+.premium-select,
+.premium-input {
+    background: rgba(15, 15, 25, 0.85);
+    border: 1px solid var(--premium-border);
+    border-radius: 8px;
+    /* 더 둥글게 */
+    color: white;
+    padding: 10px 14px;
+    /* 크기 키움 */
+    font-size: 1rem;
+    /* 폰트 키움 */
+    min-width: 140px;
+    /* 더 넓게 */
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.premium-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 40px;
+    /* 화살표 공간 */
+}
+
+.premium-select:hover,
+.premium-input:hover {
+    border-color: var(--premium-purple);
+    background: rgba(30, 30, 50, 0.95);
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.2);
+}
+
+.premium-select:focus,
+.premium-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.25);
+    background: rgba(40, 40, 60, 1);
+}
+
+/* Buttons */
+/* removed pulse pulse-glow */
+
+@keyframes pulse-glow {
+    0% {
+        box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4);
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px rgba(139, 92, 246, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(139, 92, 246, 0);
+    }
+}
+
+.btn-save-large {
+    background: linear-gradient(135deg, var(--premium-purple), var(--premium-indigo));
+    color: white;
+    border: none;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.btn-save-large:hover {
+    transform: scale(1.05);
+    filter: brightness(1.1);
+    box-shadow: 0 10px 25px rgba(139, 92, 246, 0.5);
+}
+
+.btn-save-large:active {
+    transform: scale(0.98);
+}
+
+/* removed animations and empty ruleset */
+
+/* Toast Customization Integration */
+.toast-container {
+    padding: 20px;
+}
+
+/* Spinner for buttons */
+.spinner-small {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: white;
+    animation: spin 0.8s linear infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Removed redundant action bar styles */
