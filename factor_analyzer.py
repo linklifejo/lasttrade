@@ -45,9 +45,26 @@ def analyze_factors():
             print(f"\n📈 RSI 1분봉 구간별 평균 수익률 (기대값):")
             print(rsi_stats)
             
-        # 5. 수학적 결론
-        best_rsi = rsi_stats.idxmax() if 'rsi_group' in locals() and not rsi_stats.empty else "N/A"
-        print(f"\n💡 [수학적 제안] 현재 데이터 기준, RSI 1분봉이 {best_rsi}대일 때 승률이 가장 높습니다.")
+        # 5. 수학적 결론 및 DB 저장
+        best_rsi = rsi_stats.idxmax() if 'rsi_group' in locals() and not rsi_stats.empty else None
+        
+        if best_rsi is not None:
+            print(f"\n💡 [수학적 제안] 현재 데이터 기준, RSI 1분봉이 {best_rsi}대일 때 승률이 가장 높습니다.")
+            
+            # DB에 학습된 가중치 저장
+            cursor = conn.cursor()
+            now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # RSI 하단 기준 업데이트 (예: best rsi + 5 정도로 러프하게 설정)
+            cursor.execute('''
+                INSERT INTO learned_weights (key, value, updated_at, description)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+            ''', ('optimal_rsi_threshold', float(best_rsi + 5), now, '학습된 최적 RSI 진입 문턱값'))
+            
+            conn.commit()
+            print("✅ 최적화된 파라미터가 learned_weights 테이블에 업데이트되었습니다.")
+        
         print("="*50 + "\n")
         
         conn.close()

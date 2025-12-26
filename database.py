@@ -226,6 +226,16 @@ async def init_db():
 			)
 		''')
 
+		# 3. 최적화된 학습 가중치 (밤에 공부해서 저장하는 곳)
+		await db.execute('''
+			CREATE TABLE IF NOT EXISTS learned_weights (
+				key TEXT PRIMARY KEY,
+				value REAL NOT NULL,
+				updated_at TEXT NOT NULL,
+				description TEXT
+			)
+		''')
+
 		await db.commit()
 		logger.info(f"데이터베이스 초기화 완료: {DB_FILE}")
 

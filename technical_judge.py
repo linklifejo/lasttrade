@@ -5,6 +5,17 @@ class TechnicalJudge:
     """키움 검색식에서 올라온 종목의 '성향'을 분석하여 최종 판단을 내리는 보조 판독기"""
     
     @staticmethod
+    def get_weight(key, default):
+        """DB에서 학습된 가중치 로드"""
+        try:
+            from database import get_db_connection
+            with get_db_connection() as conn:
+                res = conn.execute("SELECT value FROM learned_weights WHERE key = ?", (key,)).fetchone()
+                return res[0] if res else default
+        except:
+            return default
+
+    @staticmethod
     def judge_buy(code):
         """매수 적합성 판독"""
         indicators = get_technical_indicators(code, '1m')
@@ -14,13 +25,16 @@ class TechnicalJudge:
         score = 0
         reasons = []
         
+        # 0. 학습된 기준값 로드 (밤에 공부한 결과 반영)
+        rsi_limit = TechnicalJudge.get_weight('optimal_rsi_threshold', 30.0)
+        
         # 1. RSI 성향 체크
         rsi = indicators['rsi']
         if rsi:
-            if rsi < 30: 
+            if rsi < rsi_limit: 
                 score += 20
-                reasons.append(f"RSI 과매도 구간({rsi:.1f})")
-            elif rsi > 70:
+                reasons.append(f"RSI 최적 구간 진입({rsi:.1f} < {rsi_limit:.1f})")
+            elif rsi > 75:
                 score -= 30
                 reasons.append(f"RSI 과매수 구간({rsi:.1f})")
             else:
