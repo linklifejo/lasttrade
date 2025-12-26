@@ -22,6 +22,7 @@ from kiwoom_adapter import fn_kt00004 as get_my_stocks, get_account_data, get_to
 from kiwoom_adapter import fn_kt00001 as get_balance
 from check_n_buy import chk_n_buy, reset_accumulation_global
 from candle_manager import candle_manager
+from response_manager import response_manager
 
 class MainApp:
 	def __init__(self):
@@ -51,6 +52,9 @@ class MainApp:
 		
 		# [Time-Cut Fix] rt_search에 held_since 참조 전달 (매수 즉시 타이머 등록 가능)
 		self.chat_command.rt_search.held_since_ref = self.held_since
+		
+		# [Math] response_manager 전달
+		self.chat_command.rt_search.response_manager = response_manager
 		
 	def load_held_times(self):
 		"""DB에서 보유 시간 로드"""
@@ -335,7 +339,7 @@ class MainApp:
 			code = normalize_stock_code(stock.get('stk_cd', ''))
 			if code:
 				await asyncio.get_event_loop().run_in_executor(
-					None, chk_n_buy, code, self.chat_command.token, current_stocks, balance_data, self.held_since, outstanding_orders
+					None, chk_n_buy, code, self.chat_command.token, current_stocks, balance_data, self.held_since, outstanding_orders, response_manager
 				)
 				await asyncio.sleep(0.05)
 
@@ -698,8 +702,9 @@ class MainApp:
 				# [Web Dashboard] 웹 대시보드에서 명령어 확인 (2초마다)
 				await self.check_web_command()
 
-				# [Candle] 분봉 생성 프로세스 실행
+				# [Math] 분봉 캔들 및 대응 데이터(Response) 업데이트
 				await candle_manager.process_minute_candles()
+				await response_manager.update_metrics(self.chat_command.rt_search.current_prices)
 
 				
 				# [추가] 보유 종목 물타기/관리 및 모니터링 루프 (Dynamic Rate Limit)

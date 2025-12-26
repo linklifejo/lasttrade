@@ -197,6 +197,35 @@ async def init_db():
 			VALUES (3, '폭락장(지속 하락)', 'BEAR', '{"drop": -20.0, "duration": 7200}', 0)
 		''')
 
+		# Signal \u0026 Response Tracking (수학적 분석 및 대응 데이터 학습용)
+		# 1. 시그널 발생 시점의 팩터 스냅샷
+		await db.execute('''
+			CREATE TABLE IF NOT EXISTS signal_snapshots (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				timestamp TEXT NOT NULL,
+				code TEXT NOT NULL,
+				signal_type TEXT, -- BUY_SIGNAL, SELL_SIGNAL
+				factors_json TEXT NOT NULL, -- RSI, 변동성, 이평선 이격도 등 당시 수치들
+				market_context_json TEXT, -- 지수 상태, 거래량 등 시장 환경
+				result_id INTEGER -- trades 테이블의 ID와 매칭 (나중에 업데이트)
+			)
+		''')
+
+		# 2. 결과 및 대응 데이터 (대응 로직의 유효성 검증용)
+		await db.execute('''
+			CREATE TABLE IF NOT EXISTS response_metrics (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				signal_id INTEGER,
+				code TEXT,
+				interval_1m_change REAL, -- 1분 후 가격 변화
+				interval_5m_change REAL, -- 5분 후 가격 변화
+				max_drawdown REAL,       -- 진입 후 최대 낙폭
+				max_profit REAL,         -- 진입 후 최대 수익
+				final_outcome REAL,      -- 최종 매매 결과
+				FOREIGN KEY (signal_id) REFERENCES signal_snapshots(id)
+			)
+		''')
+
 		await db.commit()
 		logger.info(f"데이터베이스 초기화 완료: {DB_FILE}")
 
@@ -456,4 +485,38 @@ def get_candle_history_sync(code, timeframe='1m', limit=30):
 	except Exception as e:
 		logger.error(f"DB 캔들 조회 실패(Sync): {e}")
 		return []
+
+async def log_signal_snapshot(code, signal_type, factors: dict, market_context: dict = None):
+	"""시그널 발생 시점의 팩터 데이터를 스냅샷으로 저장 (Async)"""
+	import json
+	timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+	try:
+		async with aiosqlite.connect(DB_FILE) as db:
+			cursor = await db.execute('''
+				INSERT INTO signal_snapshots (timestamp, code, signal_type, factors_json, market_context_json)
+				VALUES (?, ?, ?, ?, ?)
+			''', (timestamp, code, signal_type, json.dumps(factors), json.dumps(market_context or {})))
+			signal_id = cursor.lastrowid
+			await db.commit()
+			return signal_id
+	except Exception as e:
+		logger.error(f"DB 시그널 스냅샷 저장 실패: {e}")
+		return None
+
+def log_signal_snapshot_sync(code, signal_type, factors: dict, market_context: dict = None):
+	"""시그널 발생 시점의 팩터 데이터를 스냅샷으로 저장 (Sync)"""
+	import json
+	timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+	try:
+		with get_db_connection() as conn:
+			cursor = conn.execute('''
+				INSERT INTO signal_snapshots (timestamp, code, signal_type, factors_json, market_context_json)
+				VALUES (?, ?, ?, ?, ?)
+			''', (timestamp, code, signal_type, json.dumps(factors), json.dumps(market_context or {})))
+			signal_id = cursor.lastrowid
+			conn.commit()
+			return signal_id
+	except Exception as e:
+		logger.error(f"DB 시그널 스냅샷 저장 실패(Sync): {e}")
+		return None
 

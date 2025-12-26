@@ -42,6 +42,7 @@ class RealTimeSearch:
 		self.held_since_ref = None # [Time-Cut Fix] bot.py의 held_since 참조 (즉시 타이머 등록용)
 		self.time_cut_cooldown = {} # [Time-Cut Fix] Time-Cut 매도 후 재매수 방지 {code: timestamp}
 		self.pending_orders = {} # [New] 체결 확인 대기 목록 {code: timestamp}
+		self.response_manager = None # [Math] 대응 데이터 추적기
 		
 		# [동시성 제어] 후보군 처리 프로세스 락 (중복 매수 방지)
 		self.candidates_lock = asyncio.Lock()
@@ -503,7 +504,7 @@ class RealTimeSearch:
 							c_stocks, c_balance_data, out_orders = None, None, None
 
 						success = await asyncio.get_event_loop().run_in_executor(
-							None, chk_n_buy, code, self.token, c_stocks, c_balance_data, self.held_since_ref, out_orders
+							None, chk_n_buy, code, self.token, c_stocks, c_balance_data, self.held_since_ref, out_orders, self.response_manager
 						)
 						
 						if success:

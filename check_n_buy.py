@@ -4,7 +4,7 @@ from tel_send import tel_send
 from get_setting import get_setting
 from logger import logger
 from analyze_tools import calculate_rsi, get_rsi_for_timeframe
-from database import get_price_history_sync
+from database import get_price_history_sync, log_signal_snapshot_sync
 from utils import normalize_stock_code
 from stock_info import fn_ka10001 as stock_info
 
@@ -22,7 +22,7 @@ last_sold_times = {}
 # [추가] 종목별 누적 매수 금액 추적 (API 잔고 반영 지연 시 오버 매수 방지)
 accumulated_purchase_amt = {}
 # 매수 체크 함수
-def chk_n_buy(stk_cd, token=None, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None):
+def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=None, outstanding_orders=None, response_manager=None):
 	global accumulated_purchase_amt # 전역 변수 사용
 	global last_sold_times # 매도 시간 추적용
 	
@@ -233,9 +233,24 @@ def chk_n_buy(stk_cd, token=None, current_holdings=None, current_balance_data=No
 	split_cnt = split_cnt_setting
 	single_strategy = get_setting('single_stock_strategy', 'FIRE') # 전략 로드
 	strategy_rate = float(get_setting('single_stock_rate', 1.0)) # 기준 수익률 로드
-	logger.info(f"전략 설정 로드: {single_strategy}, 기준: {strategy_rate}% (분할: {split_cnt}회) - 모든 종목 적용")
+	# [Mathematical Factor Snapshot] 학습용 데이터 수집
+	factors = {
+		'rsi_1m': rsi_1m,
+		'rsi_3m': rsi_3m,
+		'rsi_diff': (rsi_1m - rsi_3m) if (rsi_1m and rsi_3m) else 0,
+		'price': current_price,
+		'strategy': single_strategy,
+		'capital_ratio': capital_ratio
+	}
 	
+	# 시그널 스냅샷 저장 (수학적 학습의 기초 데이터)
+	signal_id = log_signal_snapshot_sync(stk_cd, 'BUY_SIGNAL', factors)
+	logger.info(f"💾 [Math Context] 시그널 스냅샷 저장 완료 (ID: {signal_id})")
 	
+	# [Response Manager] 추적 등록
+	if response_manager and signal_id:
+		response_manager.add_signal(signal_id, stk_cd, current_price)
+
 	# [매매 자금 비율] 설정값 로드 (기본 70%)
 	capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
 	logger.info(f"매매 자금 비율: {capital_ratio*100:.0f}% (순자산: {net_asset:,.0f}원)")
