@@ -6,11 +6,6 @@ logger = logging.getLogger("trading_bot")
 def calculate_rsi(prices, period=14):
     """
     주어진 가격 리스트로 RSI를 계산합니다.
-    Args:
-        prices (list): 가격 리스트 (시간순, 최근이 마지막)
-        period (int): RSI 기간 (기본 14)
-    Returns:
-        float: 최근 RSI 값 (데이터 부족 시 None)
     """
     if len(prices) < period + 1:
         return None
@@ -19,7 +14,6 @@ def calculate_rsi(prices, period=14):
         series = pd.Series(prices)
         delta = series.diff()
 
-        # 상승폭, 하락폭 계산 (절대값)
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
@@ -30,3 +24,12 @@ def calculate_rsi(prices, period=14):
     except Exception as e:
         logger.error(f"RSI 계산 오류: {e}")
         return None
+
+def get_rsi_for_timeframe(code, timeframe='1m', period=14):
+    """
+    특정 타임프레임(1m, 3m)의 RSI를 DB 데이터를 사용하여 계산합니다.
+    """
+    from database import get_candle_history_sync
+    # RSI 14를 위해 최소 30개 정도의 데이터를 가져옵니다.
+    prices = get_candle_history_sync(code, timeframe, limit=period * 2 + 5)
+    return calculate_rsi(prices, period)

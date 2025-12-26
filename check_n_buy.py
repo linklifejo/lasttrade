@@ -3,7 +3,7 @@ from kiwoom_adapter import fn_kt00001, fn_ka10004, fn_kt10000, fn_kt00004, get_t
 from tel_send import tel_send
 from get_setting import get_setting
 from logger import logger
-from analyze_tools import calculate_rsi
+from analyze_tools import calculate_rsi, get_rsi_for_timeframe
 from database import get_price_history_sync
 from utils import normalize_stock_code
 from stock_info import fn_ka10001 as stock_info
@@ -210,21 +210,21 @@ def chk_n_buy(stk_cd, token=None, current_holdings=None, current_balance_data=No
 	# [RSI 필터] 과매수(70 이상) 구간 매수 금지
 	use_rsi = get_setting('use_rsi_filter', False)
 	if use_rsi:
-		prices = get_price_history_sync(stk_cd)
-		rsi = calculate_rsi(prices)
-		# [수정] RSI 기준값도 설정화 (기본 70)
+		# [Danta] 1분봉 및 3분봉 RSI 동시 체크
+		rsi_1m = get_rsi_for_timeframe(stk_cd, '1m')
+		rsi_3m = get_rsi_for_timeframe(stk_cd, '3m')
+		
 		rsi_val_str = str(get_setting('rsi_limit', 70)).strip()
 		if not rsi_val_str: rsi_val_str = '70'
-		try:
-			rsi_limit = float(rsi_val_str)
-		except:
-			rsi_limit = 70.0
+		rsi_limit = float(rsi_val_str)
 			
-		if rsi is not None and rsi >= rsi_limit:
-			logger.warning(f"[RSI 경고] {stk_cd}: RSI 과매수 구간({rsi:.2f} >= {rsi_limit}) - 그러나 강제 매수 진행")
-			# return False # User request: Don't hesitate
-		elif rsi is not None:
-			logger.info(f"RSI 체크: {rsi:.2f}")
+		if rsi_1m is not None:
+			logger.info(f"📊 [RSI] 1분봉: {rsi_1m:.2f} (한도: {rsi_limit})")
+			if rsi_1m >= rsi_limit:
+				logger.warning(f"[RSI 경고] {stk_cd} 1분봉 과매수({rsi_1m:.2f})")
+				
+		if rsi_3m is not None:
+			logger.info(f"📊 [RSI] 3분봉: {rsi_3m:.2f}")
 	
 	# [전략 설정]
 	# 몰빵(Single)이든 분산(Distributed)이든 관계없이 아래 원칙을 적용합니다.

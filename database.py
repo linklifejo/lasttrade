@@ -47,15 +47,22 @@ async def init_db():
 			)
 		''')
 
-		# 가격 히스토리 테이블 (RSI 계산용, 1분봉 데이터 축적)
+		# 캔들 히스토리 테이블 (OHLCV 데이터 저장, 단타용 1분/3분봉 지원)
 		await db.execute('''
-			CREATE TABLE IF NOT EXISTS price_history (
+			CREATE TABLE IF NOT EXISTS candle_history (
 				code TEXT,
+				timeframe TEXT, -- '1m', '3m', '5m' 등
 				timestamp TEXT,
-				price INTEGER,
-				PRIMARY KEY (code, timestamp)
+				open INTEGER,
+				high INTEGER,
+				low INTEGER,
+				close INTEGER,
+				volume INTEGER DEFAULT 0,
+				PRIMARY KEY (code, timeframe, timestamp)
 			)
 		''')
+		
+		# 가격 히스토리 테이블 (기존 호환성 유지)
 		
 		# 보유 시간 추적 테이블 (held_times.json 대체)
 		await db.execute('''
@@ -403,5 +410,50 @@ def get_price_history_sync(code, limit=30):
 			return [row['price'] for row in rows]
 	except Exception as e:
 		logger.error(f"DB 가격 기록 조회 실패(Sync): {e}")
+		return []
+
+async def log_candle(code, timeframe, open_p, high_p, low_p, close_p, volume=0):
+	"""캔들(OHLC) 데이터 저장"""
+	timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+	try:
+		async with aiosqlite.connect(DB_FILE) as db:
+			await db.execute('''
+				INSERT OR REPLACE INTO candle_history (code, timeframe, timestamp, open, high, low, close, volume)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			''', (code, timeframe, timestamp, open_p, high_p, low_p, close_p, volume))
+			await db.commit()
+	except Exception as e:
+		logger.error(f"DB 캔들 기록 저장 실패: {e}")
+
+async def get_candle_history(code, timeframe='1m', limit=30):
+	"""캔들 데이터 조회"""
+	try:
+		async with aiosqlite.connect(DB_FILE) as db:
+			cursor = await db.execute('''
+				SELECT close FROM candle_history 
+				WHERE code = ? AND timeframe = ?
+				ORDER BY timestamp ASC 
+				LIMIT ?
+			''', (code, timeframe, limit))
+			rows = await cursor.fetchall()
+			return [row[0] for row in rows]
+	except Exception as e:
+		logger.error(f"DB 캔들 조회 실패: {e}")
+		return []
+
+def get_candle_history_sync(code, timeframe='1m', limit=30):
+	"""캔들 데이터 조회 (Sync)"""
+	try:
+		with get_db_connection() as conn:
+			cursor = conn.execute('''
+				SELECT close FROM candle_history 
+				WHERE code = ? AND timeframe = ?
+				ORDER BY timestamp ASC 
+				LIMIT ?
+			''', (code, timeframe, limit))
+			rows = cursor.fetchall()
+			return [row['close'] for row in rows]
+	except Exception as e:
+		logger.error(f"DB 캔들 조회 실패(Sync): {e}")
 		return []
 

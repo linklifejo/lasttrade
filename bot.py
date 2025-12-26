@@ -21,6 +21,7 @@ from database_helpers import save_system_status, get_pending_web_command, mark_w
 from kiwoom_adapter import fn_kt00004 as get_my_stocks, get_account_data, get_total_eval_amt, get_current_api_mode
 from kiwoom_adapter import fn_kt00001 as get_balance
 from check_n_buy import chk_n_buy, reset_accumulation_global
+from candle_manager import candle_manager
 
 class MainApp:
 	def __init__(self):
@@ -263,6 +264,9 @@ class MainApp:
 							stock['evlu_amt'] = str(new_eval)
 							stock['pl_amt'] = str(int(new_pl))
 							stock['pl_rt'] = f"{new_rate:.2f}"
+						
+						# [Candle] 틱 데이터 추가
+						candle_manager.add_tick(code, new_price)
 					except: pass
 					
 		return current_stocks, current_balance, balance_data
@@ -693,6 +697,9 @@ class MainApp:
 				
 				# [Web Dashboard] 웹 대시보드에서 명령어 확인 (2초마다)
 				await self.check_web_command()
+
+				# [Candle] 분봉 생성 프로세스 실행
+				await candle_manager.process_minute_candles()
 
 				
 				# [추가] 보유 종목 물타기/관리 및 모니터링 루프 (Dynamic Rate Limit)
