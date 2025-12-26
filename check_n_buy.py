@@ -5,6 +5,7 @@ from get_setting import get_setting
 from logger import logger
 from analyze_tools import calculate_rsi, get_rsi_for_timeframe
 from database import get_price_history_sync, log_signal_snapshot_sync
+from technical_judge import technical_judge
 from utils import normalize_stock_code
 from stock_info import fn_ka10001 as stock_info
 
@@ -225,6 +226,12 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 				
 		if rsi_3m is not None:
 			logger.info(f"📊 [RSI] 3분봉: {rsi_3m:.2f}")
+
+	# [New] Technical Judge - 종목 성향 및 보조지표 최종 판독
+	is_passed, judge_msg = technical_judge.judge_buy(stk_cd)
+	if not is_passed:
+		logger.warning(f"⚖️ [Technical Judge] {stk_cd}: 매수 거절 - {judge_msg}")
+		return False
 	
 	# [전략 설정]
 	# 몰빵(Single)이든 분산(Distributed)이든 관계없이 아래 원칙을 적용합니다.
