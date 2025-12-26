@@ -31,14 +31,30 @@ def log_buy_to_db(code, name, qty, price, mode=None):
 	timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 	amt = qty * price
 	
+	# [Simulation Context] 현재 활성화된 시뮬레이션 정보 가져오기
+	config_id = None
+	scenario_id = None
+	try:
+		with get_db_connection() as conn:
+			# 활성화된 시나리오 조회
+			s_row = conn.execute('SELECT id FROM sim_scenarios WHERE is_active = 1 LIMIT 1').fetchone()
+			if s_row: scenario_id = s_row['id']
+			
+			# 가장 최근의 시뮬레이션 설정(팩터) 조회
+			c_row = conn.execute('SELECT id FROM sim_configs ORDER BY id DESC LIMIT 1').fetchone()
+			if c_row: config_id = c_row['id']
+	except: pass
+
 	try:
 		with get_db_connection() as conn:
 			conn.execute('''
-				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, avg_price, mode)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			''', (timestamp, 'buy', code, name, qty, price, amt, price, mode))
+				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, avg_price, mode, memo)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			''', (timestamp, 'buy', code, name, qty, price, amt, price, mode, 
+				 f"SIM_CONFIG:{config_id}, SIM_SCENARIO:{scenario_id}" if config_id or scenario_id else ""))
 			conn.commit()
-			logger.info(f"✅ 매수 로그 DB 저장: {name} {qty}주 @ {price:,}원 [{mode}]")
+			logger.info(f"✅ 매수 로그 DB 저장: {name} {qty}주 @ {price:,}원 [{mode}]" + 
+						(f" (SIM:{config_id}/{scenario_id})" if config_id or scenario_id else ""))
 	except Exception as e:
 		logger.error(f"❌ 매수 로그 DB 저장 실패 ({name} @ {mode}): {e}")
 
@@ -56,14 +72,27 @@ def log_sell_to_db(code, name, qty, price, profit_rate, reason, mode=None):
 	timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 	amt = qty * price
 	
+	# [Simulation Context] 현재 활성화된 시뮬레이션 정보 가져오기
+	config_id = None
+	scenario_id = None
+	try:
+		with get_db_connection() as conn:
+			s_row = conn.execute('SELECT id FROM sim_scenarios WHERE is_active = 1 LIMIT 1').fetchone()
+			if s_row: scenario_id = s_row['id']
+			c_row = conn.execute('SELECT id FROM sim_configs ORDER BY id DESC LIMIT 1').fetchone()
+			if c_row: config_id = c_row['id']
+	except: pass
+
 	try:
 		with get_db_connection() as conn:
 			conn.execute('''
-				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, profit_rate, reason, mode)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			''', (timestamp, 'sell', code, name, qty, price, amt, profit_rate, reason, mode))
+				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, profit_rate, reason, mode, memo)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			''', (timestamp, 'sell', code, name, qty, price, amt, profit_rate, reason, mode,
+				 f"SIM_CONFIG:{config_id}, SIM_SCENARIO:{scenario_id}" if config_id or scenario_id else ""))
 			conn.commit()
-			logger.info(f"✅ 매도 로그 DB 저장: {name} {qty}주 @ {price:,}원 ({profit_rate:+.2f}%) [{mode}]")
+			logger.info(f"✅ 매도 로그 DB 저장: {name} {qty}주 @ {price:,}원 ({profit_rate:+.2f}%) [{mode}]" +
+						(f" (SIM:{config_id}/{scenario_id})" if config_id or scenario_id else ""))
 	except Exception as e:
 		logger.error(f"❌ 매도 로그 DB 저장 실패 ({name} @ {mode}): {e}")
 

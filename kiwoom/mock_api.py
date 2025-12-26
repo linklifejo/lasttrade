@@ -27,6 +27,11 @@ class MockKiwoomAPI(KiwoomAPI):
         self.outstanding_orders = []  # 미체결 주문 리스트
         self.order_counter = 1000  # 주문번호 카운터
         
+        # [Scenario Engine] 시나리오 상태 추적
+        self.current_scenario = None
+        self.scenario_start_time = 0
+        self.scenario_data = {}
+        
         logger.info(f"🎮 Mock API (DB Mode) 초기화 완료")
     
     def _initialize_db_data(self):
@@ -89,16 +94,53 @@ class MockKiwoomAPI(KiwoomAPI):
         self.last_price_update_time = now
         
         try:
-            # 설정 조회 (DB 연결 밖에서 수행)
-            volatility = float(get_setting('mock_volatility_rate', 0.8)) / 100.0
+            # 1. 활성 시나리오 확인
+            with get_db_connection() as conn:
+                row = conn.execute('SELECT id, name, type, params_json FROM sim_scenarios WHERE is_active = 1 LIMIT 1').fetchone()
+                if row:
+                    scenario_type = row['type']
+                    import json
+                    params = json.loads(row['params_json'])
+                    
+                    if self.current_scenario != row['id']:
+                        self.current_scenario = row['id']
+                        self.scenario_start_time = now
+                        logger.info(f"🎮 [Scenario Change] 신규 시나리오 활성화: {row['name']} ({scenario_type})")
+                else:
+                    scenario_type = 'RANDOM'
+                    params = {"volatility": 0.8}
+
+            # 2. 가격 업데이트 로직
+            volatility = float(params.get('volatility', 0.8)) / 100.0
             
             with get_db_connection() as conn:
                 cursor = conn.execute('SELECT p.code, p.current, s.base_price FROM mock_prices p JOIN mock_stocks s ON p.code = s.code')
                 updates = []
+                
+                elapsed = now - self.scenario_start_time
+                
                 for code, current, base_price in cursor.fetchall():
-                    change = random.uniform(-volatility, volatility)
+                    # 시나리오별 가중치 계산
+                    bias = 0
+                    if scenario_type == 'V_SHAPE':
+                        duration = params.get('duration', 3600)
+                        drop = params.get('drop', -10.0) / 100.0
+                        recovery = params.get('recovery', 12.0) / 100.0
+                        
+                        if elapsed < duration / 2: # 하락 국면
+                            bias = drop / (duration / 2)
+                        else: # 반등 국면
+                            bias = recovery / (duration / 2)
+                            
+                    elif scenario_type == 'BEAR':
+                        drop = params.get('drop', -20.0) / 100.0
+                        duration = params.get('duration', 7200)
+                        bias = drop / duration
+                        
+                    change = random.uniform(-volatility, volatility) + bias
                     new_price = int(current * (1 + change))
-                    # ±30% 제한
+                    
+                    # 상하한가 ±30% 제한
                     new_price = max(int(base_price * 0.7), min(int(base_price * 1.3), new_price))
                     updates.append((new_price, datetime.now().isoformat(), code))
                 
@@ -219,7 +261,11 @@ class MockKiwoomAPI(KiwoomAPI):
                     conn.execute('INSERT OR IGNORE INTO mock_prices (code, current, last_update) VALUES (?, ?, datetime("now"))', (stk_cd, new_base))
                     p_row = {'current': new_base}
                 
-                actual_price = p_row['current']
+                # 1. 실제 가격에 슬리피지(Slippage) 적용 (단타 전략의 혹독한 환경 모사)
+                # 매수 시에는 현재가보다 조금 비싸게(0.05%) 체결됨
+                slippage_rate = float(get_setting('mock_slippage_rate', 0.05)) / 100.0
+                actual_price = int(p_row['current'] * (1 + slippage_rate))
+                
                 actual_amt = qty * actual_price
                 
                 # 계좌 차감
@@ -239,7 +285,7 @@ class MockKiwoomAPI(KiwoomAPI):
                 
                 conn.commit()
             
-            # [미체결 주문 추적] 주문을 미체결 목록에 추가 (0.5초 후 자동 체결)
+            # [미체결 주문 추적] 주문을 미체결 목록에 추가 (랜덤 대기 시간: 0.2~0.8초)
             import threading
             order_no = f"MOCK_{self.order_counter}"
             self.order_counter += 1
@@ -257,17 +303,14 @@ class MockKiwoomAPI(KiwoomAPI):
                 'timestamp': time.time()
             }
             self.outstanding_orders.append(order)
-            logger.info(f"🎮 Mock 미체결 추가: {stk_cd} 매수 {qty}주 (주문번호: {order_no})")
             
-            # 0.5초 후 자동 체결 (미체결 목록에서 제거)
             def auto_execute():
-                time.sleep(0.5)
+                time.sleep(random.uniform(0.2, 0.8))
                 if order in self.outstanding_orders:
                     self.outstanding_orders.remove(order)
-                    logger.info(f"🎮 Mock 자동 체결: {stk_cd} 매수 {qty}주 (주문번호: {order_no})")
+                    logger.info(f"🎮 Mock 자동 체결: {stk_cd} 매수 {qty}주 @ {actual_price:,}원 (슬리피지 반영)")
             threading.Thread(target=auto_execute, daemon=True).start()
             
-            logger.info(f"🎮 Mock 매수 성공: {stk_cd} {qty}주 @ {actual_price:,}원")
             return "SUCCESS", "체결 완료"
         except Exception as e:
             logger.error(f"🎮 Mock 매수 실패: {e}")
@@ -291,10 +334,18 @@ class MockKiwoomAPI(KiwoomAPI):
                 p_row = conn.execute('SELECT current FROM mock_prices WHERE code=?', (stk_cd,)).fetchone()
                 
                 if p_row:
-                    actual_price = p_row['current']
+                    # 매도 시에는 현재가보다 조금 싸게(0.05%) 체결됨 (슬리피지)
+                    slippage_rate = float(get_setting('mock_slippage_rate', 0.05)) / 100.0
+                    actual_price = int(p_row['current'] * (1 - slippage_rate))
                 else:
                     actual_price = h_row['current_price']
-                actual_amt = qty * actual_price
+                
+                gross_amt = qty * actual_price
+                
+                # [내년 세금 반영] 매도 세금/수수료 0.3% 적용
+                tax_rate = float(get_setting('mock_tax_rate', 0.3)) / 100.0
+                tax_amt = int(gross_amt * tax_rate)
+                actual_amt = gross_amt - tax_amt
                 
                 # 계좌 가산
                 conn.execute('UPDATE mock_account SET cash = cash + ? WHERE id=1', (actual_amt,))
@@ -309,6 +360,7 @@ class MockKiwoomAPI(KiwoomAPI):
                 if s_row: actual_name = s_row['name']
                 
                 conn.commit()
+                logger.info(f"🎮 Mock 매도 계산 - 거래금액: {gross_amt:,}원, 세금(0.3%): {tax_amt:,}원, 최종입금: {actual_amt:,}원")
                 
             # [미체결 주문 추적] 매도 주문을 미체결 목록에 추가 (0.5초 후 자동 체결)
             import threading

@@ -135,6 +135,61 @@ async def init_db():
 			)
 		''')
 		
+# Simulation 관련 테이블 추가
+		# 1. 시뮬레이션 설정 (팩터 데이터 세트)
+		await db.execute('''
+			CREATE TABLE IF NOT EXISTS sim_configs (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL,
+				description TEXT,
+				factors_json TEXT NOT NULL, -- RSI 기준, 매수비중 등 모든 팩터가 JSON으로 저장됨
+				updated_at TEXT
+			)
+		''')
+
+		# 2. 시나리오 데이터 (시장 상황 시나리오)
+		await db.execute('''
+			CREATE TABLE IF NOT EXISTS sim_scenarios (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL, -- 예: 'V자 반등', '계단식 하락'
+				type TEXT NOT NULL, -- CRASH, TREND, SIDEWAYS 등
+				params_json TEXT NOT NULL, -- 변동성, 하락폭 등 시나리오 파라미터
+				is_active INTEGER DEFAULT 0
+			)
+		''')
+
+		# 3. 시뮬레이션 성적표 (학습용 결과 데이타)
+		await db.execute('''
+			CREATE TABLE IF NOT EXISTS sim_performance (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				config_id INTEGER,
+				scenario_id INTEGER,
+				start_time TEXT,
+				end_time TEXT,
+				total_return REAL,
+				mdd REAL,
+				win_rate REAL,
+				trade_count INTEGER,
+				performance_json TEXT, -- 구체적인 세부 지표들
+				FOREIGN KEY (config_id) REFERENCES sim_configs(id),
+				FOREIGN KEY (scenario_id) REFERENCES sim_scenarios(id)
+			)
+		''')
+
+		# 4. 기본 시뮬레이션 시나리오 초기 데이터 삽입
+		await db.execute('''
+			INSERT OR IGNORE INTO sim_scenarios (id, name, type, params_json, is_active)
+			VALUES (1, '기본(랜덤)', 'RANDOM', '{"volatility": 0.8}', 1)
+		''')
+		await db.execute('''
+			INSERT OR IGNORE INTO sim_scenarios (id, name, type, params_json, is_active)
+			VALUES (2, 'V자 반등(급락 후 복구)', 'V_SHAPE', '{"drop": -10.0, "duration": 3600, "recovery": 12.0}', 0)
+		''')
+		await db.execute('''
+			INSERT OR IGNORE INTO sim_scenarios (id, name, type, params_json, is_active)
+			VALUES (3, '폭락장(지속 하락)', 'BEAR', '{"drop": -20.0, "duration": 7200}', 0)
+		''')
+
 		await db.commit()
 		logger.info(f"데이터베이스 초기화 완료: {DB_FILE}")
 
