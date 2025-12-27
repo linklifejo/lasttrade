@@ -14,26 +14,7 @@ import config
 from config import socket_url
 from logger import logger
 
-# [Refactoring] Aliases definition moved up to avoid circular/init ImportErrors
-def fn_au10001(): return get_api().get_token()
-def fn_kt00001(*args, **kwargs): return get_api().get_balance(*args, **kwargs)
-def get_account_data(*args, **kwargs): return get_api().get_account_data(*args, **kwargs)
-def fn_kt00004(*args, **kwargs): return get_api().get_my_stocks(*args, **kwargs)
-def fn_kt10000(*args, **kwargs): return get_api().buy_stock(*args, **kwargs)
-def fn_kt10001(*args, **kwargs): return get_api().sell_stock(*args, **kwargs)
-def fn_ka10004(*args, **kwargs): 
-    price_data = get_api().get_current_price(*args, **kwargs)
-    if isinstance(price_data, dict): return float(price_data.get('stk_prpr', 0))
-    return float(price_data or 0)
-def fn_opw00007(*args, **kwargs): return get_api().get_trade_history(*args, **kwargs)
-
-get_my_stocks = fn_kt00004
-get_balance = fn_kt00001
-get_token = fn_au10001
-buy_stock = fn_kt10000
-sell_stock = fn_kt10001
-get_bid_price = fn_ka10004
-get_trade_history = fn_opw00007
+# ========== 전역 상태 및 API 인스턴스 관리 ==========
 
 # 전역 설정 추적
 _api_instance = None
@@ -184,6 +165,8 @@ def get_current_price(stk_cd: str, token=None) -> Optional[int]:
     return get_api().get_current_price(stk_cd, token)
 
 
+
+
 def get_current_api_mode() -> str:
     """현재 API 모드 반환 ('Mock', 'Paper', 또는 'Real')"""
     api = get_api()
@@ -260,3 +243,14 @@ def mock_simulate_scenario(code: str, scenario: str):
         api.simulate_price_scenario(code, scenario)
     else:
         logger.warning("Real API에서는 시나리오 시뮬레이션을 할 수 없습니다")
+
+
+# Aliases for better code readability
+# [Move] Defined at end of file to ensure all functions (e.g. fn_opw00007) are defined before assignment
+get_my_stocks = fn_kt00004
+get_balance = fn_kt00001
+get_token = fn_au10001
+buy_stock = fn_kt10000
+sell_stock = fn_kt10001
+get_bid_price = fn_ka10004
+get_trade_history = fn_opw00007

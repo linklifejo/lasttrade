@@ -23,11 +23,14 @@ last_sold_times = {}
 # [추가] 종목별 누적 매수 금액 추적 (API 잔고 반영 지연 시 오버 매수 방지)
 accumulated_purchase_amt = {}
 # 매수 체크 함수
-def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=None, outstanding_orders=None, response_manager=None):
+def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None):
 	global accumulated_purchase_amt # 전역 변수 사용
 	global last_sold_times # 매도 시간 추적용
 	
 	logger.info(f'[매수 체크] 종목 코드: {stk_cd}')
+	
+	rsi_1m = None
+	rsi_3m = None
 	
 	# [쿨타임 체크] 같은 종목을 너무 자주 매수하는 것을 방지 (기본 10분)
 	# [쿨타임 체크] 같은 종목을 너무 자주 매수하는 것을 방지 (10분 -> 30초로 단축)
@@ -131,7 +134,7 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 	if current_holding is not None:
 		try:
 			# 자산 정보를 미리 가져와서 할당액 계산 (위치 이동)
-			total_eval_amt_est = float(get_total_eval_amt(token=token)) if not current_balance_data else float(current_balance_data.get('total_asset', 0))
+			total_eval_amt_est = float(get_total_eval_amt(token=token)) if not current_balance_data else float(current_balance_data.get('total_asset', current_balance_data.get('net_asset', 0)))
 			cap_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
 			alloc_per_stock = (total_eval_amt_est * cap_ratio) / target_cnt
 			
@@ -241,11 +244,14 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 	min_prob = float(get_setting('math_min_win_rate', 0.55)) # 최소 승률 55%
 	min_count = int(get_setting('math_min_sample_count', 5))  # 최소 표본 5건
 	
-	logger.info(f"📊 [Math Filter] RSI_1m: {rsi_1m:.2f} -> 기대 승률: {win_prob*100:.1f}% (표본: {sample_count}건)")
+	# [Fix] rsi_1m 또는 win_prob가 None인 경우를 위한 안전한 포맷팅
+	rsi_fmt = f"{rsi_1m:.2f}" if rsi_1m is not None else "N/A"
+	prob_fmt = f"{win_prob*100:.1f}" if win_prob is not None else "N/A"
+	logger.info(f"📊 [Math Filter] RSI_1m: {rsi_fmt} -> 기대 승률: {prob_fmt}% (표본: {sample_count}건)")
 	
 	# 데이터가 충분할 때만 승률 필터 적용
 	math_weight = 1.0
-	if sample_count >= min_count:
+	if sample_count >= min_count and win_prob is not None:
 		if win_prob < min_prob:
 			logger.warning(f"📉 [Math Filter] {stk_cd}: 기대 승률({win_prob*100:.1f}%)이 기준({min_prob*100:.0f}%) 미달하여 매수 취소")
 			return False
@@ -262,6 +268,14 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 	capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
 	single_strategy = get_setting('single_stock_strategy', 'FIRE') # 전략 로드
 	strategy_rate = float(get_setting('single_stock_rate', 1.0)) # 기준 수익률 로드
+	split_cnt = int(get_setting('split_buy_cnt', 5)) # 분할 매수 횟수 로드
+	target_cnt = float(get_setting('target_stock_count', 5.0)) # 목표 종목 수 로드
+	
+	# 순자산(Total Asset) 조회
+	if current_balance_data:
+		net_asset = float(current_balance_data.get('total_asset', current_balance_data.get('net_asset', 0)) or 0)
+	else:
+		net_asset = float(get_total_eval_amt(token=token) or 0)
 	
 	# 현재가(호가) 정보 가져오기
 	try:
@@ -289,7 +303,7 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 	if response_manager and signal_id and current_price > 0:
 		response_manager.add_signal(signal_id, stk_cd, current_price)
 
-	logger.info(f"매매 자금 비율: {capital_ratio*100:.0f}% (순자산: {net_asset:,.0f}원)")
+	logger.info(f"매매 자금 비율: {capital_ratio*100:.0f}% (순자산: {int(net_asset or 0):,})")
 	
 	# 종목당 총 배정 금액 (순자산의 설정 비율만큼 사용 * 수학적 가중치)
 	# 예를 들어 자산 1000만원, 종목 5개, 비율 50%, 가중치 1.2인 경우
@@ -415,35 +429,55 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 		# 현재 매입 비율
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
-		# 다음 단계 찾기
-		next_step_idx = -1
+		# [퀀트 팩터 로직] 수익률에 따른 목표 단계(Scale) 자동 계산
+		# 팩터(1.5)를 기준으로 수익률/손실률이 몇 배가 되었는지 계산하여 목표 단계를 결정함
+		# 예: -4.68% / 1.5 = 3.12 -> Target Step 3 (물타기 3회분 누적)
+		target_step_by_pl = 0
+		if strategy_rate > 0:
+			if single_strategy == "WATER" and pl_rt <= -strategy_rate:
+				target_step_by_pl = int(abs(pl_rt) / strategy_rate)
+			elif single_strategy == "FIRE" and pl_rt >= strategy_rate:
+				target_step_by_pl = int(pl_rt / strategy_rate)
+		
+		# 현재 채워진 단계와 수익률 기준 목표 단계 중 더 높은 것을 타겟으로 설정
+		# (Catch-up 로직: 급락 시 단계를 건너뛰어 한 번에 매수)
 		target_ratio_val = 0
+		next_step_idx = 0
 		
 		for i, threshold in enumerate(cumulative_ratios):
-			# 현재 채워진 비율이 해당 단계 목표보다 작으면 (오차 허용 95%)
-			# 즉, 아직 이 단계를 완료하지 못했다면 여기가 우리가 채워야 할 목표입니다.
-			if filled_ratio < (threshold * 0.98):
+			# [Rule 1] 1차 매수(진입)는 무조건 수행
+			# [Rule 2] 2차 이상부터는 목표 단계(target_step_by_pl) 이내일 때만 수행
+			# [Rule 3] 현재 비중이 설정된 기준(70%)보다 낮을 때만 추가 매수
+			
+			can_buy_step = False
+			if i == 0: can_buy_step = True # 신규 진입
+			elif i <= target_step_by_pl and pl_rt < 0: can_buy_step = True # 물타기 (손실 시에만)
+			elif i <= target_step_by_pl and pl_rt > 0 and single_strategy == "FIRE": can_buy_step = True # 불타기
+			
+			if can_buy_step and filled_ratio < (threshold * 0.70):
 				next_step_idx = i
 				target_ratio_val = threshold
+				# 만약 수익률 기준 목표(target_step_by_pl)가 아직 더 높다면 계속 루프를 돌며 비중을 쌓음
+				if (i + 1) < target_step_by_pl:
+					continue
 				break
 		
-		if next_step_idx != -1:
-			# 목표 금액 = 총할당 * 누적목표비율
-			target_amt = alloc_per_stock * target_ratio_val
-			# 필요한 매수 금액 = 목표 금액 - 현재 매입 금액
-			one_shot_amt = target_amt - cur_pchs_amt
+		# 목표 금액 = 총할당 * 누적목표비율
+		target_amt = alloc_per_stock * target_ratio_val
+		# 필요한 매수 금액 = 목표 금액 - 현재 매입 금액
+		one_shot_amt = target_amt - cur_pchs_amt
 			
-			if one_shot_amt < 0: one_shot_amt = 0 # 방어
-			
-			# [수정] 추가 매수에도 최소 금액 보장
-			MIN_PURCHASE_AMOUNT = 50000
-			if one_shot_amt > 0 and one_shot_amt < MIN_PURCHASE_AMOUNT:
-				logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원)이 최소 기준 미만 → {MIN_PURCHASE_AMOUNT:,.0f}원으로 조정")
-				one_shot_amt = MIN_PURCHASE_AMOUNT
-			
-			if next_step_idx == 0:
-				msg_reason = "매수 잔량 채우기"
-			else:
+		if one_shot_amt < 0: one_shot_amt = 0 # 방어
+		
+		# [수정] 추가 매수에도 최소 금액 보장
+		MIN_PURCHASE_AMOUNT = 50000
+		if one_shot_amt > 0 and one_shot_amt < MIN_PURCHASE_AMOUNT:
+			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원)이 최소 기준 미만 → {MIN_PURCHASE_AMOUNT:,.0f}원으로 조정")
+			one_shot_amt = MIN_PURCHASE_AMOUNT
+		
+		if next_step_idx == 0:
+			msg_reason = "매수 잔량 채우기"
+		else:
 				# 2번째 단계(idx 1)가 '1차 물타기'가 되도록 -1 적용
 				tag = "물타기" if single_strategy == "WATER" else "불타기"
 				msg_reason = f"추가매수({next_step_idx}차 {tag})"

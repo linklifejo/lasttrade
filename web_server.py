@@ -448,10 +448,10 @@ async def startup_event():
         from database import init_db
         await init_db()
         
-        # 2. 봇 인스턴스 실행
-        asyncio.create_task(run_bot_safe())
-        
-        print("✅ 봇 백그라운드 태스크 시작 완료")
+        # 2. 봇 인스턴스 실행 (start.py에서 별도 윈도우로 실행하도록 분리됨)
+        # asyncio.create_task(run_bot_safe())
+        # print("✅ 봇 백그라운드 태스크 시작 완료")
+        print("ℹ️ 엔진(Bot)은 외부 프로세스로 실행되어야 합니다 (start.py 참조)")
     except Exception as e:
         print(f"❌ 봇 초기화 실패: {e}")
         with open("startup_error.txt", "a") as f:

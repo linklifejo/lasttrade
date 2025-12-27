@@ -304,12 +304,10 @@ class MockKiwoomAPI(KiwoomAPI):
             }
             self.outstanding_orders.append(order)
             
-            def auto_execute():
-                time.sleep(random.uniform(0.2, 0.8))
-                if order in self.outstanding_orders:
-                    self.outstanding_orders.remove(order)
-                    logger.info(f"🎮 Mock 자동 체결: {stk_cd} 매수 {qty}주 @ {actual_price:,}원 (슬리피지 반영)")
-            threading.Thread(target=auto_execute, daemon=True).start()
+            conn.commit()
+            
+            # [Fix] 즉시 업데이트를 위해 가격 및 계좌 데이터 리프레시 강제 호출
+            self._update_prices(force=True)
             
             return "SUCCESS", "체결 완료"
         except Exception as e:
@@ -383,13 +381,9 @@ class MockKiwoomAPI(KiwoomAPI):
             logger.info(f"🎮 Mock 미체결 추가: {stk_cd} 매도 {qty}주 (주문번호: {order_no})")
             
             # 0.5초 후 자동 체결 (미체결 목록에서 제거)
-            def auto_execute():
-                time.sleep(0.5)
-                if order in self.outstanding_orders:
-                    self.outstanding_orders.remove(order)
-                    logger.info(f"🎮 Mock 자동 체결: {stk_cd} 매도 {qty}주 (주문번호: {order_no})")
-            threading.Thread(target=auto_execute, daemon=True).start()
-                
+            # [Fix] 즉시 업데이트 강제 호출
+            self._update_prices(force=True)
+            
             profit_rate = (actual_price / avg_price - 1) * 100 if avg_price > 0 else 0
             logger.info(f"🎮 Mock 매도 성공: {stk_cd} {qty}주 @ {actual_price:,}원 ({profit_rate:+.2f}%)")
             return "SUCCESS", "체결 완료"

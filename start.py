@@ -6,33 +6,54 @@ import webbrowser
 
 # [설정] 실행할 스크립트
 WEB_SERVER_SCRIPT = "web_server.py"
+BOT_SCRIPT = "bot.py"
 
 # stop.py의 강력한 종료 기능을 가져옵니다 (종료 시에만 사용)
 def cleanup_before_start():
     """시작 전 간단한 정리 (빠른 실행)"""
     print("[+] Cleaning up previous processes...", end="", flush=True)
-    # 이전 봇 프로세스만 빠르게 정리
+    # 이전 프로세스들을 확실히 정리
     os.system('wmic process where "commandline like \'%%web_server.py%%\'" delete >nul 2>&1')
+    os.system('wmic process where "commandline like \'%%bot.py%%\'" delete >nul 2>&1')
     os.system('wmic process where "commandline like \'%%watchdog.py%%\'" delete >nul 2>&1')
+    
+    # [New] 기존 락 파일 정리
+    for lock in ['main.lock', 'web.lock']:
+        if os.path.exists(lock):
+            try: os.remove(lock)
+            except: pass
     print(" Done.")
+    
+    
 
 
 def run_system():
-    """서버와 봇(web_server.py) 실행"""
-    print(f"[+] Starting Kiwoom Bot System...", end="", flush=True)
-    
+    """서버와 봇을 각각 별도 콘솔 창에서 실행"""
     python_exe = sys.executable
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), WEB_SERVER_SCRIPT)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # 웹 서버(및 내장된 봇)를 새로운 콘솔 창에서 실행
-    # [수정] Agent 환경 디버깅을 위해 콘솔 분리 옵션 제거 및 현재 프로세스에 연결
-    proc = subprocess.Popen(
-        [python_exe, script_path], 
-        cwd=os.path.dirname(script_path)
-        # creationflags=subprocess.CREATE_NEW_CONSOLE # 제거
+    server_path = os.path.join(script_dir, WEB_SERVER_SCRIPT)
+    bot_path = os.path.join(script_dir, BOT_SCRIPT)
+    
+    print(f"[+] Starting Mock Server...", end="", flush=True)
+    server_proc = subprocess.Popen(
+        [python_exe, server_path], 
+        cwd=script_dir,
+        creationflags=subprocess.CREATE_NEW_CONSOLE
     )
     print(" Done.")
-    return proc
+    
+    time.sleep(1)
+    
+    print(f"[+] Starting Trading Engine...", end="", flush=True)
+    bot_proc = subprocess.Popen(
+        [python_exe, bot_path], 
+        cwd=script_dir,
+        creationflags=subprocess.CREATE_NEW_CONSOLE
+    )
+    print(" Done.")
+    
+    return server_proc, bot_proc
 
 def open_browser():
     """브라우저에서 대시보드 열기 (이미 열려있으면 새 탭 사용)"""
@@ -71,7 +92,7 @@ if __name__ == "__main__":
     time.sleep(1)
     
     # 2. 시스템 시작
-    system_process = run_system()
+    server_process, bot_process = run_system()
     
     # 3. 브라우저 열기
     open_browser()
@@ -81,12 +102,30 @@ if __name__ == "__main__":
     print("💡 Press Ctrl+C in this window to STOP ALL systems safely.")
     
     try:
-        # 4. 메인 루프
+        # 4. 메인 루프 (두 프로세스 모두 모니터링)
+        print("\n⏳ Monitoring processes (5s grace period)...")
+        time.sleep(5) # 윈도우 심(Shim) 프로세스 종료 대기 시간
+
         while True:
-            time.sleep(1)
-            if system_process.poll() is not None:
-                print("\n⚠️ System process ended unexpectedly.")
-                break
+            time.sleep(5)
+            # 서버 프로세스 체크
+            if server_process.poll() is not None:
+                # 윈도우 환경에서는 프로세스가 살아있어도 poll이 리턴될 수 있으므로 한 번 더 확인
+                print("\n⚠️ Mock Server process status changed. Checking stability...")
+                time.sleep(2)
+                if server_process.poll() is not None:
+                    # 실제 종료됨
+                    # print("\n⚠️ Mock Server process ended.")
+                    # break (일단 창이 떠있으면 계속 유지하도록 처리 가능하나, 여기서는 브레이크 유지)
+                    pass 
+
+            if bot_process.poll() is not None:
+                # 엔진도 동일하게 체크
+                pass
+                
+        # [수정] 런처가 꺼져도 실제 봇 창은 살아있게 하려면 여기서 대기
+        # print("\n💡 Launcher is now in monitoring mode. Press Ctrl+C to stop all.")
+        # while True: time.sleep(100)
                 
     except KeyboardInterrupt:
         print("\n\n🛑 Stopping system requested by user...")
@@ -94,12 +133,13 @@ if __name__ == "__main__":
     finally:
         # 5. 종료 시 자동 청소
         print("🧹 Performing safe shutdown...")
-        try:
-            if system_process.poll() is None:
-                system_process.terminate()
-                time.sleep(0.5)  # 프로세스 종료 대기
-        except: 
-            pass
+        for proc in [server_process, bot_process]:
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+            except: pass
+        
+        time.sleep(1)
         
         # stop.py 호출로 최종 정리 (동기 실행)
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -107,14 +147,12 @@ if __name__ == "__main__":
         
         print("🧹 Running cleanup script...")
         try:
-            # 동기적으로 실행하여 완전히 종료될 때까지 대기
             result = subprocess.run(
                 [sys.executable, stop_script],
                 capture_output=True,
                 text=True,
                 timeout=10
             )
-            # stop.py의 출력 표시
             if result.stdout:
                 print(result.stdout)
         except subprocess.TimeoutExpired:

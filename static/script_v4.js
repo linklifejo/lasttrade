@@ -191,10 +191,11 @@ function updateHoldingsTable(stocks) {
         const cur_prc = parseInt(parseNum(stock.cur_prc));
         const hold_time = stock.hold_time || '0분';
         const water_step = stock.watering_step || '-';
+        const avg_prc = parseInt(parseNum(stock.pchs_avg_pric || stock.avg_prc));
         const rateClass = rate >= 0 ? 'profit-cell' : 'loss-cell';
         const pnlClass = pnl >= 0 ? 'profit-cell' : 'loss-cell';
 
-        return { name, rate, pnl, qty, cur_prc, hold_time, water_step, rateClass, pnlClass };
+        return { name, avg_prc, rate, pnl, qty, cur_prc, hold_time, water_step, rateClass, pnlClass };
     });
 
     // 4. 기존 DOM 행 관리 (Name 기준)
@@ -222,6 +223,7 @@ function updateHoldingsTable(stocks) {
             row = document.createElement('tr');
             row.innerHTML = `
                 <td class="stress stock-name-cell">${data.name}</td>
+                <td class="avg-price-cell"></td>
                 <td class="rate-cell"></td>
                 <td class="pnl-cell"></td>
                 <td class="qty-cell"></td>
@@ -245,13 +247,18 @@ function updateHoldingsTable(stocks) {
 
         // 셀 데이터 업데이트 (변경된 경우에만)
         const cells = {
-            rate: row.querySelector('.rate-cell') || row.cells[1],
-            pnl: row.querySelector('.pnl-cell') || row.cells[2],
-            qty: row.querySelector('.qty-cell') || row.cells[3],
-            price: row.querySelector('.price-cell') || row.cells[4],
-            time: row.querySelector('.time-cell') || row.cells[5],
-            step: row.querySelector('.step-cell') || row.cells[6]
+            avg: row.querySelector('.avg-price-cell') || row.cells[1],
+            rate: row.querySelector('.rate-cell') || row.cells[2],
+            pnl: row.querySelector('.pnl-cell') || row.cells[3],
+            qty: row.querySelector('.qty-cell') || row.cells[4],
+            price: row.querySelector('.price-cell') || row.cells[5],
+            time: row.querySelector('.time-cell') || row.cells[6],
+            step: row.querySelector('.step-cell') || row.cells[7]
         };
+
+        // 평균단가
+        const avgText = formatNumber(data.avg_prc);
+        if (cells.avg.textContent !== avgText) cells.avg.textContent = avgText;
 
         // 수익률
         const rateText = `${data.rate >= 0 ? '+' : ''}${data.rate.toFixed(2)}%`;

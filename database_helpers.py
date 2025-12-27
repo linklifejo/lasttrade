@@ -256,6 +256,24 @@ def get_current_status(mode='MOCK'):
 						minutes = int((time.time() - held_since) / 60)
 						hold_time = f"{minutes}분"
 					
+					# [Sync] 팩터(Factor) 기반 단계 계산 로직 (수익률 기준)
+					st_mode = get_setting('single_stock_strategy', 'WATER').upper()
+					strategy_rate = float(get_setting('single_stock_rate', 1.5))
+					
+					factor_step = 0
+					if strategy_rate > 0:
+						if 'WATER' in st_mode and pl_rt <= -strategy_rate:
+							factor_step = int(abs(pl_rt) / strategy_rate)
+						elif 'FIRE' in st_mode and pl_rt >= strategy_rate:
+							factor_step = int(pl_rt / strategy_rate)
+					
+					# [UI Labeling]
+					if factor_step == 0:
+						step_str = "1차(진입)"
+					else:
+						mode_str = "물타기" if 'WATER' in st_mode else "불타기"
+						step_str = f"{mode_str} {factor_step}차"
+					
 					holdings.append({
 						'stk_cd': code,
 						'stk_nm': name,
@@ -268,7 +286,7 @@ def get_current_status(mode='MOCK'):
 						'pl_amt': pl_amt,
 						'pl_rt': f"{pl_rt:.2f}",
 						'hold_time': hold_time,
-						'watering_step': '1차(진입)',
+						'watering_step': step_str,
 						'note': '매집 중'
 					})
 					
@@ -514,8 +532,14 @@ def save_system_status(status_data):
 	"""실시간 봇 상태 저장 (모드별 분리 저장)"""
 	timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 	try:
-		# 데이터 내부의 api_mode 확인, 없으면 기본값 시도
-		mode = status_data.get('api_mode', 'REAL').upper()
+		# 데이터 내부의 api_mode 확인 (summary 내부에 있을 수 있음)
+		mode = status_data.get('api_mode')
+		if not mode and 'summary' in status_data:
+			mode = status_data['summary'].get('api_mode')
+		
+		if not mode: mode = 'REAL'
+		mode = mode.upper()
+		
 		status_json = json.dumps(status_data, ensure_ascii=False)
 		
 		with get_db_connection() as conn:

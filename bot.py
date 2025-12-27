@@ -352,10 +352,12 @@ class MainApp:
 
 		# 데이터 준비
 		deposit = 0
-		if balance_data: deposit = int(balance_data['deposit'])
+		if balance_data: 
+			try: deposit = int(balance_data.get('deposit', 0) or 0)
+			except: deposit = 0
 		elif current_balance: 
-			try: deposit = int(current_balance[2])
-			except: pass
+			try: deposit = int(current_balance[2] or 0)
+			except: deposit = 0
 
 		total_eval_sum = 0
 		total_pl_sum = 0
@@ -498,6 +500,15 @@ class MainApp:
 						pl_amt = int(float(pl_str))
 					except: pass
 					
+					# [Fix] 평균가/현재가 재검증 (데이터 불일치 방지)
+					pur_amt = int(float(s.get('pchs_amt', 0)))
+					evlt_amt = int(float(s.get('evlu_amt', 0)))
+					avg_prc = float(s.get('pchs_avg_pric', 0)) # [New] 평균가 가져오기
+					pl_amt = evlt_amt - pur_amt
+					pl_rt = (pl_amt / pur_amt * 100) if pur_amt > 0 else 0
+					
+					item['pchs_avg_pric'] = int(avg_prc) # UI 전달용 추가
+					
 					# [재계산] 평가손익 재계산 (현재가 보정 반영)
 					# API 값이 신뢰성이 떨어지므로 직접 계산이 안전함
 					if pur_amt > 0:
@@ -526,31 +537,47 @@ class MainApp:
 						mn = int((time.time() - self.held_since[code]) / 60)
 						item['hold_time'] = f"{mn}분"
 					
-					# 단계(Step) 계산 로직 개선 (1단계 90% 이상 채워지면 2차로 표시)
+					# [Sync] 팩터(Factor) 기반 단계 계산 로직 (수익률 기준)
+					st_strategy = str(get_setting('single_stock_strategy', get_setting('strategy', 'WATER'))).upper()
+					strategy_rate_val = float(get_setting('single_stock_rate', 1.5))
+					s_cnt = int(float(get_setting('split_buy_cnt', 5))) # 분할 횟수
+					
+					f_step = 0
+					if strategy_rate_val > 0:
+						if 'WATER' in st_strategy and pl_rt <= -strategy_rate_val:
+							f_step = int(abs(pl_rt) / strategy_rate_val)
+						elif 'FIRE' in st_strategy and pl_rt >= strategy_rate_val:
+							f_step = int(pl_rt / strategy_rate_val)
+					
+					# 금액 기반 단계 (기전 로직 보강)
 					ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-					step_idx = 0
+					a_step = 0
 					for i, th in enumerate(cumulative_ratios):
-						if ratio >= (th * 0.90): 
-							step_idx = i + 1
-						else: 
-							break
+						if ratio >= (th * 0.70): # [사용자 기준] 70%만 채워져도 해당 단계로 인정
+							a_step = i + 1
+						else: break
+					
+					# 최종 단계 = 수익률 기준(f_step)과 금액 기준(a_step) 중 큰 것 + 기본 진입(1)
+					# 신규 진입 시 0이 아니라 1부터 시작하도록 보정
+					computed_step = max(f_step + 1, a_step)
+					if computed_step < 1: computed_step = 1
 					
 					# [UI Labeling]
-					if step_idx == 0:
-						step_str = "1차(진입중)"
-					elif step_idx == 1:
-						# 1차 물량은 다 채웠고 2차 물량 채우는 중
-						step_str = "1차(완료)"
+					m_str = "물타기" if 'WATER' in st_strategy else "불타기"
+					if computed_step <= 1:
+						step_str = "1차(진입)"
 					else:
-						# [Fix] 전략 명칭에 맞는 정확한 용어 표시
-						st_mode = str(get_setting('single_stock_strategy', get_setting('strategy', 'WATER'))).upper()
-						mode_str = "물타기" if 'WATER' in st_mode else "불타기"
-						
-						# step_idx=2이면 '물타기 2차'
-						step_str = f"{mode_str} {step_idx}차"
-						if step_idx >= split_cnt: step_str += "(MAX)"
+						step_str = f"{m_str} {computed_step}차"
+					
+					# [Fix] MAX 표시 부활
+					if computed_step >= s_cnt:
+						step_str = f"{m_str} {computed_step}차(MAX)"
 					
 					item['watering_step'] = step_str
+					
+					# [Debug] 엔진 로그 출력 (단계를 건너뛸 때)
+					if computed_step > 1:
+						logger.info(f"📊 [UI] {code}: {pl_rt:.1f}% -> {step_str} (Ratio:{ratio:.2f})")
 					
 					# [UI Feedback] 매집 상태 (Time-Cut 여부)
 					# 정밀도 상향 (90% -> 95%)
@@ -564,10 +591,14 @@ class MainApp:
 					logger.error(f"Status Update Error for {s.get('stk_nm')}: {e}")
 
 		# 최종 자산 update
-		total_asset = deposit + total_eval_sum
+		# [Fix] deposit 또는 total_eval_sum이 None일 경우를 위한 안전장치
+		total_asset = int(deposit or 0) + int(total_eval_sum or 0)
 		
 		# [Asset Offset] 모의투자 계좌 기본값(3억)과 실제 시작 자산(5억) 차이 보정
-		asset_offset = int(get_setting('asset_offset', 0))
+		# [Fix] get_setting('asset_offset')이 None일 수 있으므로 integer 변환 필수
+		asset_offset_raw = get_setting('asset_offset', 0)
+		asset_offset = int(asset_offset_raw if asset_offset_raw is not None else 0)
+		
 		if asset_offset != 0:
 			total_asset += asset_offset
 			logger.debug(f"[Asset Offset] {asset_offset:,}원 적용 -> 보정 후 총자산: {total_asset:,}원")
@@ -774,7 +805,9 @@ class MainApp:
 								logger.info(f"[보유시간 현황] {len(self.held_since)}개 종목 추적 중")
 
 					except Exception as e:
-						logger.error(f"[MainLoop] 주기적 루프 오류: {e}")
+						import traceback
+						logger.error(f"[MainLoop] 주기적 루프 오류:\n{traceback.format_exc()}")
+						await asyncio.sleep(5) # 오류 시 대기
 						
 				# 1분 통계 기록
 				now = datetime.datetime.now()
@@ -861,6 +894,13 @@ class MainApp:
 			await self.chat_command.stop(False)
 
 async def main():
+	import os
+	import ctypes
+	if os.name == 'nt':
+		ctypes.windll.kernel32.SetConsoleTitleW("🤖 Kiwoom Trading Engine (Main Bot)")
+	
+	script_dir = os.path.dirname(os.path.abspath(__file__))
+	
 	# 설정 데이터 검증 (DB 기반)
 	from database_helpers import get_all_settings
 	settings = get_all_settings()
@@ -904,7 +944,10 @@ async def main():
 			app = MainApp()
 			await app.run()
 	except Exception as e:
-		logger.error(f"메인 프로세스 오류: {e}")
+		import traceback
+		logger.error(f"메인 프로세스 오류:\n{traceback.format_exc()}")
+		# [Debug] 오류 발생 시 창이 바로 닫히지 않도록 대기 (start.py에서 모니터링 중)
+		await asyncio.sleep(10)
 	finally:
 		# 종료 시 정리
 		logger.info("프로그램이 완전히 종료되었습니다.")
