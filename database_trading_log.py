@@ -228,7 +228,8 @@ def get_today_trading_stats(mode=None):
 			cursor = conn.execute(f'''
 				SELECT COUNT(*) as total,
 				       SUM(CASE WHEN profit_rate > 0 THEN 1 ELSE 0 END) as wins,
-				       SUM(amt * profit_rate / 100.0 / (1 + profit_rate / 100.0)) as total_profit
+				       SUM(amt * profit_rate / 100.0 / (1 + profit_rate / 100.0)) as total_profit,
+				       AVG(profit_rate) as avg_profit
 				FROM trades
 				{where_clause}
 			''', params)
@@ -237,7 +238,8 @@ def get_today_trading_stats(mode=None):
 			return {
 				'total': row['total'] or 0,
 				'wins': row['wins'] or 0,
-				'total_profit': row['total_profit'] or 0.0
+				'total_profit': row['total_profit'] or 0.0,
+				'avg_profit': row['avg_profit'] or 0.0
 			}
 	except Exception as e:
 		logger.error(f"❌ 매매 통계 조회 실패: {e}")

@@ -280,8 +280,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					
 					continue
 
-				# DB에 매매 기록 저장
-				log_trade_sync("SELL", stock_code, stock['stk_nm'], int(stock['rmnd_qty']), int(stock.get('cur_prc', 0)), pl_rt, sell_reason)
+				# [Legacy] DB에 매매 기록 저장 (log_sell_to_db로 대체됨)
+				# log_trade_sync("SELL", stock_code, stock['stk_nm'], int(stock['rmnd_qty']), int(stock.get('cur_prc', 0)), pl_rt, sell_reason)
 				
 				# [매매 로그 DB 저장 - 완전한 기록]
 				try:

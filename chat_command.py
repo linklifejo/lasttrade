@@ -586,6 +586,7 @@ class ChatCommand:
 
 			[도움말]
 			• help - 이 도움말 표시
+			• analyze (또는 분석) - 수학적 기대치 및 최적 RSI 분석
 
 			모든 명령어는 퍼센트 단위로 입력하세요."""
 			
@@ -683,6 +684,18 @@ class ChatCommand:
 			return True
 		except Exception as e:
 			tel_send(f"❌ sellall 명령어 오류: {e}")
+			return False
+
+	async def analyze(self):
+		"""수학적 분석 엔진을 실행하여 결과를 리포팅합니다."""
+		try:
+			from math_analyzer import get_analysis_report
+			report = get_analysis_report()
+			tel_send(report)
+			return True
+		except Exception as e:
+			logger.error(f"분석 실행 중 오류: {e}")
+			tel_send(f"❌ 분석 실행 중 오류: {e}")
 			return False
 
 	async def reset_asset(self):
@@ -1034,6 +1047,8 @@ class ChatCommand:
 			else:
 				tel_send("❌ 사용법: brt {숫자} (예: brt 3)")
 				return False
+		elif command == 'analyze' or command == '분석':
+			return await self.analyze()
 		else:
 			tel_send(f"❓ 알 수 없는 명령어입니다: {text}")
 			return False

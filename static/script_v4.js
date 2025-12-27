@@ -577,10 +577,11 @@ function updateReportSummary(stats) {
     tpEl.textContent = `${profit >= 0 ? '+' : ''}${Math.round(profit).toLocaleString()}원`;
     tpEl.className = 'stat-value ' + (profit >= 0 ? 'profit-cell' : 'loss-cell');
 
-    // 4. 평균 수익률 (Approximate if not sent from server)
-    // For now, keep it simple in summary bar
+    // 4. 평균 수익률 (Server provides avg_profit)
+    const avgReturn = stats.avg_profit || 0;
     const arEl = document.getElementById('report-avg-return');
-    arEl.textContent = `-`;
+    arEl.textContent = `${avgReturn >= 0 ? '+' : ''}${avgReturn.toFixed(2)}%`;
+    arEl.className = 'stat-value ' + (avgReturn >= 0 ? 'profit-cell' : 'loss-cell');
 }
 
 function updateSellTable(logs) {

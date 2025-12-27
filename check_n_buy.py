@@ -233,19 +233,50 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 		logger.warning(f"⚖️ [Technical Judge] {stk_cd}: 매수 거절 - {judge_msg}")
 		return False
 	
-	# [전략 설정]
-	# 몰빵(Single)이든 분산(Distributed)이든 관계없이 아래 원칙을 적용합니다.
-	# 1. 분할 매수 (설정 시 1:1:2 등)
-	# 2. 예수금 체크 (50% 미만 시 스킵)
-	split_cnt = split_cnt_setting
+	# [Math Probability Filter] 수학적 기대 승률 체크
+	from math_analyzer import get_win_probability
+	win_prob, sample_count = get_win_probability(rsi_1m)
+	
+	# 설정값 로드
+	min_prob = float(get_setting('math_min_win_rate', 0.55)) # 최소 승률 55%
+	min_count = int(get_setting('math_min_sample_count', 5))  # 최소 표본 5건
+	
+	logger.info(f"📊 [Math Filter] RSI_1m: {rsi_1m:.2f} -> 기대 승률: {win_prob*100:.1f}% (표본: {sample_count}건)")
+	
+	# 데이터가 충분할 때만 승률 필터 적용
+	math_weight = 1.0
+	if sample_count >= min_count:
+		if win_prob < min_prob:
+			logger.warning(f"📉 [Math Filter] {stk_cd}: 기대 승률({win_prob*100:.1f}%)이 기준({min_prob*100:.0f}%) 미달하여 매수 취소")
+			return False
+		
+		# [Math Engine] 기대 승률에 따른 비중 조절 (0.5배 ~ 1.5배)
+		# 기준 승률(min_prob) 이상일 때, 추가 승률 1%당 5% 비중 확대
+		math_weight = 1.0 + (win_prob - min_prob) * 5.0
+		math_weight = max(0.8, min(1.5, math_weight)) # 너무 급격한 축소는 방지 (최소 0.8배)
+		logger.info(f"⚖️ [Math Weight] 기대 승률 가중치 적용: {math_weight:.2f}x (승률 {win_prob*100:.1f}%)")
+	else:
+		logger.info(f"ℹ️ [Math Filter] 표본 수가 부족하여({sample_count}/{min_count}) 가중치 없이 기본 비중 사용")
+
+	# [전략 설정 및 변수 정의]
+	capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
 	single_strategy = get_setting('single_stock_strategy', 'FIRE') # 전략 로드
 	strategy_rate = float(get_setting('single_stock_rate', 1.0)) # 기준 수익률 로드
+	
+	# 현재가(호가) 정보 가져오기
+	try:
+		current_price = int(check_bid(stk_cd, token=token))
+	except:
+		current_price = 0
+
 	# [Mathematical Factor Snapshot] 학습용 데이터 수집
 	factors = {
 		'rsi_1m': rsi_1m,
 		'rsi_3m': rsi_3m,
 		'rsi_diff': (rsi_1m - rsi_3m) if (rsi_1m and rsi_3m) else 0,
 		'price': current_price,
+		'win_prob': win_prob,
+		'sample_count': sample_count,
 		'strategy': single_strategy,
 		'capital_ratio': capital_ratio
 	}
@@ -255,17 +286,15 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 	logger.info(f"💾 [Math Context] 시그널 스냅샷 저장 완료 (ID: {signal_id})")
 	
 	# [Response Manager] 추적 등록
-	if response_manager and signal_id:
+	if response_manager and signal_id and current_price > 0:
 		response_manager.add_signal(signal_id, stk_cd, current_price)
 
-	# [매매 자금 비율] 설정값 로드 (기본 70%)
-	capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
 	logger.info(f"매매 자금 비율: {capital_ratio*100:.0f}% (순자산: {net_asset:,.0f}원)")
 	
-	# 종목당 총 배정 금액 (순자산의 설정 비율만큼 사용)
-	# 예를 들어 자산 1000만원, 종목 5개, 비율 50%인 경우
-	# (1000만 * 0.5) / 5 = 100만원이 종목당 할당액
-	alloc_per_stock = (net_asset * capital_ratio) / target_cnt
+	# 종목당 총 배정 금액 (순자산의 설정 비율만큼 사용 * 수학적 가중치)
+	# 예를 들어 자산 1000만원, 종목 5개, 비율 50%, 가중치 1.2인 경우
+	# ((1000만 * 0.5) / 5) * 1.2 = 120만원이 종목당 할당액
+	alloc_per_stock = ((net_asset * capital_ratio) / target_cnt) * math_weight
 	
 	# [1:1:2:4... 기하급수적 분할 매수 로직 적용]
 	# 분할 매수 횟수에 따라 자동으로 가중치를 계산합니다. (1, 1, 2, 4, 8, 16...)
@@ -353,7 +382,7 @@ def chk_n_buy(stk_cd, token, current_stocks=None, balance_data=None, held_since=
 
 		expense = one_shot_amt
 		msg_reason = f"신규 매수 (초기 {initial_buy_ratio*100:.0f}%)"
-		logger.info(f"[{msg_reason}] {stk_cd}: 매수 진행 (목표: {one_shot_amt:,.0f}원, 전체 할당: {alloc_per_stock:,.0f}원)")
+		logger.info(f"[{msg_reason}] {stk_cd}: 매수 진행 (목표: {one_shot_amt:,.0f}원, 전체 할당(가중): {alloc_per_stock:,.0f}원)")
 
 	else:
 		# [기보유 종목 처리]
