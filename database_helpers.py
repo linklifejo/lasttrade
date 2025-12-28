@@ -372,6 +372,12 @@ def get_current_status(mode='MOCK'):
 					else:
 						deposit = total_asset = total_buy = total_pl = 0
 
+					# [추가] 종목당 할당액 계산 (순자산 * 70% / 목표종목수)
+					capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
+					target_stock_count_val = float(get_setting('target_stock_count', 5))
+					alloc_per_stock = (total_asset * capital_ratio) / target_stock_count_val if target_stock_count_val > 0 else 1
+					split_buy_cnt_val = int(get_setting('split_buy_cnt', 5))
+
 					# 보유종목 상세 정보 구성
 					if api_holdings:
 						# trades 테이블에서 평균가 미리 계산 (API 보정용)
@@ -405,11 +411,9 @@ def get_current_status(mode='MOCK'):
 							
 							# [Dynamic Step Calculation] 1:1:2:2:4 원칙 적용
 							try:
-								st_ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-								
 								# 1. 가중치 수열 (1, 1, 2, 2, 4...)
 								weights = []
-								for i in range(split_buy_cnt):
+								for i in range(split_buy_cnt_val):
 									weights.append(2**(i // 2))
 								tw = sum(weights)
 								
@@ -429,7 +433,7 @@ def get_current_status(mode='MOCK'):
 									s_mode = str(get_setting('single_stock_strategy', 'WATER')).upper()
 									m_str = "물타기" if 'WATER' in s_mode else "불타기"
 									step_str = f"{m_str} {step_idx}차"
-									if step_idx >= split_buy_cnt: step_str += "(MAX)"
+									if step_idx >= split_buy_cnt_val: step_str += "(MAX)"
 							except:
 								step_str = "보유중"
 
