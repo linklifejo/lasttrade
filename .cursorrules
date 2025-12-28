@@ -3,3 +3,4 @@
 1. **Language**: Always communicate in Korean (한글로 대화).
 2. **Precision**: 수정을 아주 세심하게 요구내용만 한다. 아니면 질문한다. (Perform modifications very meticulously and only on the requested content. Otherwise, ask questions.)
 3. **Git Management**: 사용자가 "처리해라" 등의 명시적인 요청을 할 때, 현재까지의 변경 사항을 Git에 반영(add, commit, push)하여 GitHub와 동기화한다.
+4. **Onboarding**: 새로운 대화가 시작되거나 모델이 변경되면, 반드시 최우선으로 `trading_rules.md`를 필독하여 프로젝트의 고유 정체성(키움 REST API 이름으로 운영되나 기술적으로 한국투자증권 시스템이 통합된 특수 배경 등)을 완전히 파악한 후 작업을 시작한다. 함부로 파일을 삭제하거나 설계를 변경하지 않는다.
