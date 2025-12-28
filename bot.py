@@ -953,7 +953,14 @@ async def main():
 		logger.info("프로그램이 완전히 종료되었습니다.")
 
 if __name__ == '__main__':
+	import sys
 	try:
 		asyncio.run(main())
+		# 정상 종료
+		sys.exit(0)
 	except KeyboardInterrupt:
-		pass
+		logger.info("사용자 요청으로 프로그램을 종료합니다.")
+		sys.exit(0)  # Ctrl+C도 정상 종료로 간주
+	except Exception as e:
+		logger.error(f"치명적 오류로 프로그램 종료: {e}")
+		sys.exit(1)  # 비정상 종료

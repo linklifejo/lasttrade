@@ -78,20 +78,26 @@ def run_zombie():
                     print(f"[{timestamp}] [WATCHDOG] 👮 이상 무! 봇이 열심히 매매 중입니다.")
                     print("="*40 + "\n")
 
-            # 3. 종료 감지 및 알림
-            crash_msg = f"⚠️ 봇 프로세스 종료 감지! (Code: {exit_code})"
-            log(crash_msg)
-            tel_send(crash_msg)
-            
-            if exit_code != 0:
+            # 3. 종료 감지 및 분기
+            if exit_code == 0:
+                # 정상 종료 (사용자 의도 또는 정상 완료)
+                normal_msg = f"✅ 봇이 정상 종료되었습니다. (Code: {exit_code})"
+                log(normal_msg)
+                tel_send(normal_msg)
+                log("Watchdog 종료: 정상 종료 감지로 재시작하지 않습니다.")
+                break  # 루프 탈출 (재시작 안 함)
+            else:
+                # 비정상 종료 (크래시)
+                crash_msg = f"⚠️ 봇 프로세스 비정상 종료 감지! (Code: {exit_code})"
+                log(crash_msg)
+                tel_send(crash_msg)
                 tel_send("🚨 비정상 종료 발생! 로그를 확인하세요.")
-            
-            # 4. 재시작 대기
-            retry_msg = "♻️ 5초 후 봇을 재가동합니다..."
-            log(retry_msg)
-            tel_send(retry_msg)
-            
-            time.sleep(5)
+                
+                # 4. 재시작 대기
+                retry_msg = "♻️ 5초 후 봇을 재가동합니다..."
+                log(retry_msg)
+                tel_send(retry_msg)
+                time.sleep(5)
             
         except KeyboardInterrupt:
             stop_msg = "🛑 사용자 요청으로 좀비 모드를 종료합니다."
