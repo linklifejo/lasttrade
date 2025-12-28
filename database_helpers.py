@@ -256,23 +256,41 @@ def get_current_status(mode='MOCK'):
 						minutes = int((time.time() - held_since) / 60)
 						hold_time = f"{minutes}분"
 					
-					# [Sync] 팩터(Factor) 기반 단계 계산 로직 (수익률 기준)
+					# [Sync] 사용자 정의 수열(1:1:2:2:4) 기반 단계 계산
 					st_mode = get_setting('single_stock_strategy', 'WATER').upper()
-					strategy_rate = float(get_setting('single_stock_rate', 1.5))
+					split_buy_cnt = int(get_setting('split_buy_cnt', 5))
 					
-					factor_step = 0
-					if strategy_rate > 0:
-						if 'WATER' in st_mode and pl_rt <= -strategy_rate:
-							factor_step = int(abs(pl_rt) / strategy_rate)
-						elif 'FIRE' in st_mode and pl_rt >= strategy_rate:
-							factor_step = int(pl_rt / strategy_rate)
+					# 1. 가중치 수열 생성
+					weights = []
+					for i in range(split_buy_cnt):
+						weight = 2**(i // 2)
+						weights.append(weight)
+					total_weight = sum(weights)
 					
-					# [UI Labeling]
-					if factor_step == 0:
-						step_str = "1차(진입)"
-					else:
-						mode_str = "물타기" if 'WATER' in st_mode else "불타기"
-						step_str = f"{mode_str} {factor_step}차"
+					# 2. 누적 비중 계산
+					cumulative_ratios = []
+					curr_s = 0
+					for w in weights:
+						curr_s += w
+						cumulative_ratios.append(curr_s / total_weight)
+					
+					# 3. 실제 투입액 기반 단계 판독
+					# 종목당 할당액 (순자산 * 70% / 목표종목수)
+					capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
+					target_stock_count = float(get_setting('target_stock_count', 5))
+					alloc_per_stock = (total_asset * capital_ratio) / target_stock_count if target_stock_count > 0 else 1
+					
+					actual_step = 0
+					for i, threshold in enumerate(cumulative_ratios):
+						if pur_amt >= (alloc_per_stock * threshold * 0.90):
+							actual_step = i + 1
+					
+					display_step = actual_step if actual_step <= split_buy_cnt else split_buy_cnt
+					if display_step == 0: display_step = 1 # 진입 기본 1차
+					
+					mode_str = "물타기" if 'WATER' in st_mode else "불타기"
+					step_str = f"{mode_str} {display_step}차"
+					if display_step >= split_buy_cnt: step_str += "(MAX)"
 					
 					holdings.append({
 						'stk_cd': code,
@@ -385,29 +403,28 @@ def get_current_status(mode='MOCK'):
 								minutes = int((time.time() - held_since) / 60)
 								hold_time = f"{minutes}분"
 							
-							# [Dynamic Step Calculation] 
+							# [Dynamic Step Calculation] 1:1:2:2:4 원칙 적용
 							try:
 								st_ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
 								
-								# 가중치 계산 (1, 1, 2, 4, 8...)
+								# 1. 가중치 수열 (1, 1, 2, 2, 4...)
 								weights = []
 								for i in range(split_buy_cnt):
-									if i < 2: weights.append(1)
-									else: weights.append(weights[-1] * 2)
+									weights.append(2**(i // 2))
 								tw = sum(weights)
 								
+								# 2. 단계 판독
 								step_idx = 0
 								curr_s = 0
 								for i, w in enumerate(weights):
 									curr_s += w
 									th = curr_s / tw
-									if st_ratio >= (th * 0.90):
+									if pur_amt >= (alloc_per_stock * th * 0.90):
 										step_idx = i + 1
 									else:
 										break
 								
-								if step_idx == 0: step_str = "1차(진입중)"
-								elif step_idx == 1: step_str = "1차(완료)"
+								if step_idx <= 1: step_str = "1차"
 								else:
 									s_mode = str(get_setting('single_stock_strategy', 'WATER')).upper()
 									m_str = "물타기" if 'WATER' in s_mode else "불타기"

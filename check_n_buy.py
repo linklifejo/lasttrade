@@ -264,18 +264,15 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	else:
 		logger.info(f"ℹ️ [Math Filter] 표본 수가 부족하여({sample_count}/{min_count}) 가중치 없이 기본 비중 사용")
 
+	# [자산 데이터 정리] 위에서 이미 계산된 balance와 net_asset 사용
+	# net_asset = 예수금(deposit_amt) + 주식평가금(stock_val)
+	
 	# [전략 설정 및 변수 정의]
 	capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
 	single_strategy = get_setting('single_stock_strategy', 'FIRE') # 전략 로드
 	strategy_rate = float(get_setting('single_stock_rate', 1.0)) # 기준 수익률 로드
 	split_cnt = int(get_setting('split_buy_cnt', 5)) # 분할 매수 횟수 로드
 	target_cnt = float(get_setting('target_stock_count', 5.0)) # 목표 종목 수 로드
-	
-	# 순자산(Total Asset) 조회
-	if current_balance_data:
-		net_asset = float(current_balance_data.get('total_asset', current_balance_data.get('net_asset', 0)) or 0)
-	else:
-		net_asset = float(get_total_eval_amt(token=token) or 0)
 	
 	# 현재가(호가) 정보 가져오기
 	try:
@@ -313,12 +310,11 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	# [1:1:2:4... 기하급수적 분할 매수 로직 적용]
 	# 분할 매수 횟수에 따라 자동으로 가중치를 계산합니다. (1, 1, 2, 4, 8, 16...)
 	
-	# 1. 가중치 생성
+	# 1. 가중치 생성 (Rule: 1:1:2:2:4:4...)
 	split_cnt_int = int(split_cnt)
 	weights = []
 	for i in range(split_cnt_int):
-		# [Rule Fix] 1:1:2:2:4:4:8:8... 로직 적용 (2단계마다 2배 증가)
-		# 사용자님의 절대 원칙을 준수하여 가중치 수열을 생성합니다.
+		# 2단계마다 2배씩 증가하는 사용자 수열 (1, 1, 2, 2, 4, 4...)
 		weight = 2**(i // 2)
 		weights.append(weight)
 			
@@ -429,61 +425,78 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		# 현재 매입 비율
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
-		# [퀀트 팩터 로직] 수익률에 따른 목표 단계(Scale) 자동 계산
-		# 팩터(1.5)를 기준으로 수익률/손실률이 몇 배가 되었는지 계산하여 목표 단계를 결정함
-		# 예: -4.68% / 1.5 = 3.12 -> Target Step 3 (물타기 3회분 누적)
-		target_step_by_pl = 0
-		if strategy_rate > 0:
-			if single_strategy == "WATER" and pl_rt <= -strategy_rate:
-				target_step_by_pl = int(abs(pl_rt) / strategy_rate)
-			elif single_strategy == "FIRE" and pl_rt >= strategy_rate:
-				target_step_by_pl = int(pl_rt / strategy_rate)
+		# [단계 판독 로직 정밀화] 1:1:2:2:4 수열에 따른 실제 투입액 기준
+		actual_current_step = 0
+		for i, threshold in enumerate(cumulative_ratios):
+			# 실제 투입된 돈이 목표 비중의 90% 이상이면 해당 단계 인정
+			if cur_pchs_amt >= (alloc_per_stock * threshold * 0.90):
+				actual_current_step = i + 1
 		
-		# 현재 채워진 단계와 수익률 기준 목표 단계 중 더 높은 것을 타겟으로 설정
-		# (Catch-up 로직: 급락 시 단계를 건너뛰어 한 번에 매수)
+		# UI 표시용 단계 (최대 split_cnt로 제한)
+		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt
+		
+		# 2. 손실액 기반 목표 단계 결정 (단위 손실액 420원 원리)
+		strategy_rate_val = float(get_setting('single_stock_rate', 1.5))
+		total_target_loss = alloc_per_stock * (strategy_rate_val / 100.0)
+		unit_loss_trigger = total_target_loss / split_cnt
+		
+		evlu_pnl = 0
+		if current_holding:
+			for field in ['evlu_pnl', 'evpnl_amt', 'pnl_amt', 'pchs_pnl_amt']:
+				if field in current_holding and current_holding[field]:
+					try:
+						evlu_pnl = float(current_holding[field])
+						if evlu_pnl != 0: break
+					except: continue
+			if evlu_pnl == 0:
+				try:
+					cur_prc = float(current_holding.get('cur_prc', 0))
+					pchs_avg = float(current_holding.get('pchs_avg_pric', 0))
+					qty = int(current_holding.get('rmnd_qty', 0))
+					if cur_prc > 0 and pchs_avg > 0 and qty > 0:
+						evlu_pnl = (cur_prc - pchs_avg) * qty
+				except: pass
+
+		current_loss_amt = abs(evlu_pnl) if evlu_pnl < 0 else 0
+		if current_loss_amt == 0 and pl_rt < 0:
+			current_loss_amt = abs(cur_pchs_amt * (abs(pl_rt) / 100.0))
+		
+		# 손실액 비례 목표 단계
+		target_step_by_amt = int(current_loss_amt / unit_loss_trigger) if unit_loss_trigger > 0 else 0
+		if target_step_by_amt >= split_cnt: target_step_by_amt = split_cnt - 1
+		
+		# 3. 추가 매수 결정
 		target_ratio_val = 0
 		next_step_idx = 0
 		
-		for i, threshold in enumerate(cumulative_ratios):
-			# [Rule 1] 1차 매수(진입)는 무조건 수행
-			# [Rule 2] 2차 이상부터는 목표 단계(target_step_by_pl) 이내일 때만 수행
-			# [Rule 3] 현재 비중이 설정된 기준(70%)보다 낮을 때만 추가 매수
-			
-			can_buy_step = False
-			if i == 0: can_buy_step = True # 신규 진입
-			elif i <= target_step_by_pl and pl_rt < 0: can_buy_step = True # 물타기 (손실 시에만)
-			elif i <= target_step_by_pl and pl_rt > 0 and single_strategy == "FIRE": can_buy_step = True # 불타기
-			
-			if can_buy_step and filled_ratio < (threshold * 0.70):
-				next_step_idx = i
-				target_ratio_val = threshold
-				# 만약 수익률 기준 목표(target_step_by_pl)가 아직 더 높다면 계속 루프를 돌며 비중을 쌓음
-				if (i + 1) < target_step_by_pl:
-					continue
-				break
+		if actual_current_step <= target_step_by_amt:
+			next_step_idx = target_step_by_amt
+			target_ratio_val = cumulative_ratios[next_step_idx]
 		
-		# 목표 금액 = 총할당 * 누적목표비율
 		target_amt = alloc_per_stock * target_ratio_val
-		# 필요한 매수 금액 = 목표 금액 - 현재 매입 금액
 		one_shot_amt = target_amt - cur_pchs_amt
-			
-		if one_shot_amt < 0: one_shot_amt = 0 # 방어
+		if one_shot_amt < 0: one_shot_amt = 0
 		
-		# [수정] 추가 매수에도 최소 금액 보장
-		MIN_PURCHASE_AMOUNT = 50000
-		if one_shot_amt > 0 and one_shot_amt < MIN_PURCHASE_AMOUNT:
-			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원)이 최소 기준 미만 → {MIN_PURCHASE_AMOUNT:,.0f}원으로 조정")
-			one_shot_amt = MIN_PURCHASE_AMOUNT
+		# [Log] 사용자 원칙 기반 투명한 수치 공개
+		logger.info(f"📊 [WATER 분석] {stk_cd}:")
+		logger.info(f"   - 종목할당액(70%준수): {int(alloc_per_stock):,}원")
+		logger.info(f"   - 실제투입단계: {display_step}/{int(split_cnt)} (투입액:{int(cur_pchs_amt):,}원)")
+		logger.info(f"   - 손실기준단계: {target_step_by_amt+1}/{int(split_cnt)} (현재손실:{int(current_loss_amt):,}원 / 단위트리거:{int(unit_loss_trigger):,}원)")
 		
-		if next_step_idx == 0:
-			msg_reason = "매수 잔량 채우기"
-		else:
-				# 2번째 단계(idx 1)가 '1차 물타기'가 되도록 -1 적용
-				tag = "물타기" if single_strategy == "WATER" else "불타기"
-				msg_reason = f"추가매수({next_step_idx}차 {tag})"
+		# 5. 매수 금액 산출
+		target_amt = alloc_per_stock * target_ratio_val
+		one_shot_amt = target_amt - cur_pchs_amt
+		if one_shot_amt < 0: one_shot_amt = 0
+		
+		# [Log] 금액 기반 판단 근거 기록
+		logger.info(f"📊 [금액기준 판독] {stk_cd}: 현재손실 {int(current_loss_amt):,}원 (트리거:{int(unit_loss_trigger)}원) -> 목표단계:{target_step_by_amt+1}/{int(split_cnt)}")
+		
+		if one_shot_amt > 0 and one_shot_amt < 50000:
+			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원) 최소 기준 미달 → 5만원 조정")
+			one_shot_amt = 50000
+
 		if filled_ratio >= 0.98:
-			# 이미 목표 비중을 거의 다 채운 상태임 (오차 2% 이내)
-			logger.info(f"[매수 스킬] {stk_cd}: 이미 목표 비중({filled_ratio*100:.1f}%)에 도달하여 추가 매수를 금지합니다.")
+			logger.info(f"[매수 스킬] {stk_cd}: 이미 목표 비중({filled_ratio*100:.1f}%) 도달")
 			return False
 
 		# [안전장치] 현재 매도 조건(익절/손절/트레일링)을 만족하는지 확인
@@ -507,34 +520,18 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 			logger.warning(f"[매수 스킵] 예수금 부족 ({balance:,.0f}원 < 목표액 {one_shot_amt:,.0f}원의 50%)")
 			return False
 			
-		# 전략에 따른 추가 매수 결정
+		# [최종 매수 여부 결정] 
+		# 위에서 금액 기반으로 계산된 one_shot_amt가 있으면 매수 진행
 		should_buy = False
 		msg_prefix = ""
 		
-		# FIRE: 불타기 (수익 중일 때 매수)
-		if single_strategy == "FIRE":
-			if pl_rt >= strategy_rate:
-				should_buy = True
-				msg_prefix = f"불타기(수익률 {pl_rt}%)"
-			else:
-				logger.info(f"[매수 스킵] {stk_cd}: 불타기 기준({strategy_rate}%) 미달 (현재: {pl_rt}%)")
-				
-		# WATER: 물타기 (손실 중일 때 매수) -> [개선] 하이브리드: 손실 시 물타기 OR 확실한 수익 시 불타기
-		elif single_strategy == "WATER":
-			# 1. 물타기 (손실 구간)
-			# [최종 수정] 설정된 팩터(single_stock_rate)를 따르도록 변경
-			# 예: 설정이 3.0이면 -3.0% 이하일 때만 매수
-			if pl_rt <= -strategy_rate:
-				should_buy = True
-				msg_prefix = f"물타기(수익률 {pl_rt}%)"
-			# 2. 불타기 (수익 구간 - 추세 추종)
-			# 설정값(strategy_rate) 이상일 때만 불타기
-			elif pl_rt >= strategy_rate:
-				should_buy = True
-				msg_prefix = f"불타기(수익률 {pl_rt}%)"
-			else:
-				# -3% ~ +3% 사이는 관망
-				logger.info(f"[매수 스킵] {stk_cd}: 추가매수 대기 - 손실 -{strategy_rate}% 이하 또는 수익 +{strategy_rate}% 이상일 때만 진입 (현재 {pl_rt}%)")
+		if one_shot_amt > 10000: # 최소 1만원 이상일 때만
+			should_buy = True
+			tag = "물타기" if evlu_pnl < 0 else "불타기"
+			msg_prefix = f"{tag}(목표단계:{target_step_by_amt+1})"
+		else:
+			# 매수 조건 미달 시 관망 로그 (이미 위에서 판독 로그가 찍혔으므로 필요시만 추가)
+			pass
 
 		if should_buy:
 			expense = one_shot_amt

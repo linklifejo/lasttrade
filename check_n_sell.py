@@ -125,18 +125,19 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				logger.warning(f"[TimeCutCheck] {stock_name}: held_since 정보 없음 (Keys: {list(held_since.keys()) if held_since else 'None'})")
 				time_cut_limit = 999999
 
+			# [데이터 준비] 매입 금액 계산
+			pchs_amt = 0
+			if 'pur_amt' in stock and stock['pur_amt']: pchs_amt = int(stock['pur_amt'])
+			elif 'pchs_amt' in stock and stock['pchs_amt']: pchs_amt = int(stock['pchs_amt'])
+			else:
+				try: pchs_amt = float(stock.get('pchs_avg_pric', 0)) * int(stock.get('rmnd_qty', 0))
+				except: pchs_amt = 0
+
 			if held_since and stock_code in held_since:
 				if elapsed_sec >= time_cut_limit:
 					# 목표 수익률과 상관없이 최소 기준 (예: 1.0%)
 					if pl_rt < TIME_CUT_PROFIT:
 						# [대원칙] 매집 중에는 시간컷도 스킵
-						pchs_amt = 0
-						if 'pur_amt' in stock and stock['pur_amt']: pchs_amt = int(stock['pur_amt'])
-						elif 'pchs_amt' in stock and stock['pchs_amt']: pchs_amt = int(stock['pchs_amt'])
-						else:
-							try: pchs_amt = float(stock.get('pchs_avg_pric', 0)) * int(stock.get('rmnd_qty', 0))
-							except: pchs_amt = 0
-						
 						# 목표 할당 금액의 95% 미만이면 매집 중으로 판단
 						if pchs_amt < alloc_per_stock * 0.95:
 							logger.info(f"[시간컷 스킵] {stock_name}: 매집 진행 중")
@@ -146,25 +147,53 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						sell_reason = f"TimeCut({elapsed_sec/60:.0f}분)"
 						logger.info(f"[Time-Cut] {stock_name}: {elapsed_sec/60:.0f}분 경과, 수익률({pl_rt}%) < 기준({TIME_CUT_PROFIT}%) -> 교체 매매 진행")
 
-			# [물타기 전략 예외 처리 - 손절 방어]
-			# 사용자가 10회 분할 매수를 설정한 경우, 비중을 모두 채울 때까지는 손절하지 않고 끝까지 버팁니다.
-			if single_strategy == "WATER" and pl_rt < SL_RATE:
-				pchs_amt = 0
-				# 매입금액 확인 (필드 다양성 대응)
-				if 'pur_amt' in stock and stock['pur_amt']: pchs_amt = int(stock['pur_amt'])
-				elif 'pchs_amt' in stock and stock['pchs_amt']: pchs_amt = int(stock['pchs_amt'])
-				else:
-					try: pchs_amt = float(stock.get('pchs_avg_pric', 0)) * int(stock.get('rmnd_qty', 0))
-					except: pchs_amt = 0
+			# [물타기 전략 절대 원칙] 
+			if single_strategy == "WATER":
+				# 1. 절대 손실액 계산 (필드 호환성 + 직접 계산 + 수익률 역산)
+				evlu_pnl = 0
+				# 가능한 필드 체크
+				for field in ['evlu_pnl', 'evpnl_amt', 'pnl_amt', 'pchs_pnl_amt']:
+					if field in stock and stock[field]:
+						try:
+							evlu_pnl = float(stock[field])
+							if evlu_pnl != 0: break
+						except: continue
+				
+				# 0이면 직접 계산
+				if evlu_pnl == 0:
+					try:
+						cur_prc = float(stock.get('cur_prc', 0))
+						pchs_avg = float(stock.get('pchs_avg_pric', 0))
+						qty = int(stock.get('rmnd_qty', 0))
+						if cur_prc > 0 and pchs_avg > 0 and qty > 0:
+							evlu_pnl = (cur_prc - pchs_avg) * qty
+					except: pass
+				
+				current_loss_amt = abs(evlu_pnl) if evlu_pnl < 0 else 0
+				
+				# [WATER 전략 엄격 적용] 5회 완료 전까지는 손절 금지, 완료 후 1.5% 초과 시 손절
+				strategy_rate_water = float(cached_setting('single_stock_rate', 1.5))
+				total_target_loss = alloc_per_stock * (strategy_rate_water / 100.0)
+				
+				# 슬리피지 보정 (1.5% 목표 달성을 위해 1.48% 수준에서 선제적 감시)
+				precision_target_loss = total_target_loss * 0.985 
+				
+				is_accumulated = (pchs_amt >= alloc_per_stock * 0.95)
+				is_over_loss = (current_loss_amt > precision_target_loss)
 
-				# [핵심 변경] 목표 할당 금액을 다 채우기 전까지는 하드 손절 없이 무조건 버팀
-				if pchs_amt < alloc_per_stock * 0.95:
-					logger.info(f"[물타기 보호] {stock_name}: 매집 중 손절 스킵")
-					continue # 매도 로직 건너뜀 (매수 봇이 다음 물타기를 진행함)
-				else:
-					logger.info(f"[손절 진행] {stock_name}: 모든 분할 매수 완료 후 손절선 도달 ({pl_rt}%)")
+				# [판단] 매집 완료 AND 손실 한도 초과 시에만 손절
+				if is_accumulated and is_over_loss:
+					logger.info(f"🚨 [WATER 손절] {stock_name}: 5회 매집 완료({int(pchs_amt/alloc_per_stock*100)}%) 및 손실({int(current_loss_amt):,}원) > 한도({int(total_target_loss):,}원) -> 즉시 매도")
 					should_sell = True
-					sell_reason = "손절"
+					sell_reason = f"WATER손절({pl_rt}%)"
+				elif not is_accumulated:
+					# 매집 중에는 손절액을 넘었더라도 물타기를 위해 보유 (엔진에서 물타기 수행)
+					if is_over_loss:
+						logger.info(f"💧 [WATER 대기] {stock_name}: 손실액({int(current_loss_amt):,}원) 초과이나 매집 중({int(pchs_amt/alloc_per_stock*100)}%)이므로 물타기 진행")
+					else:
+						# 조용한 로깅
+						pass
+					if not should_sell: pass # SL_RATE 차단
 
 			# [트레일링 스탑 로직]
 			# TS는 물타기 완성 여부와 상관없이 무조건 실행 (익절 기회 보호)
@@ -211,9 +240,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			if pl_rt > TP_RATE:
 				should_sell = True
 				sell_reason = "익절"
-			elif pl_rt < SL_RATE:
+			elif pl_rt < SL_RATE and single_strategy == "FIRE":
 				should_sell = True
-				sell_reason = "손절"
+				sell_reason = "손절(FIRE)"
 
 			if should_sell:
 				# [대원칙] 미체결 매수 주문 확인 및 취소
