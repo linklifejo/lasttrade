@@ -317,10 +317,10 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	split_cnt_int = int(split_cnt)
 	weights = []
 	for i in range(split_cnt_int):
-		if i < 2:
-			weights.append(1)
-		else:
-			weights.append(weights[-1] * 2)
+		# [Rule Fix] 1:1:2:2:4:4:8:8... 로직 적용 (2단계마다 2배 증가)
+		# 사용자님의 절대 원칙을 준수하여 가중치 수열을 생성합니다.
+		weight = 2**(i // 2)
+		weights.append(weight)
 			
 	total_weight = sum(weights)
 	
