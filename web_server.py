@@ -94,30 +94,21 @@ async def get_dashboard():
 async def get_status():
     """현재 자산 및 보유 종목 조회 (DB 기반 실시간 계산)"""
     try:
-        from database_helpers import get_system_status, get_current_status, get_setting
+        from database_helpers import get_current_status, get_setting
         
         # 1. DB에서 현재 설정된 모드 확인
         use_mock = get_setting('use_mock_server', True)
         is_paper = get_setting('is_paper_trading', True)
         current_mode = "MOCK" if use_mock else "REAL"
         
-        # 2. DB에서 최신 상태 조회 (현재 설정된 모드에 맞는 데이터만)
-        bot_status = get_system_status(mode=current_mode)
+        # 2. PAPER 모드일 경우 보정
+        if not use_mock and is_paper:
+            current_mode = "PAPER"
         
-        # 3. 데이터가 있고 내역의 모드가 현재 설정과 일치하면 반환
-        if bot_status:
-            summary = bot_status.get('summary', {})
-            bot_api_mode = summary.get('api_mode', 'MOCK')
-            bot_is_paper = summary.get('is_paper', True)
-            
-            # 모드가 정확히 일치할 때만 캐시 사용 (불일치 시 4번으로 넘어가서 즉시 재계산)
-            if bot_api_mode.upper() == current_mode.upper() and bot_is_paper == is_paper:
-                return bot_status
-
-        # 4. 데이터가 없거나 모드가 바뀌었으면 DB에서 실시간으로 직접 계산 (강제 전환 효과)
+        # 3. 항상 실시간으로 계산 (캐시 사용 안 함)
         status = get_current_status(current_mode)
         
-        # summary에 현재 설정값 명시 (프론트엔드 UI 갱신 도움)
+        # 4. summary에 현재 설정값 명시
         if 'summary' in status:
             status['summary']['api_mode'] = current_mode
             status['summary']['is_paper'] = is_paper

@@ -191,7 +191,7 @@ function updateHoldingsTable(stocks) {
         const cur_prc = parseInt(parseNum(stock.cur_prc));
         const hold_time = stock.hold_time || '0분';
         const water_step = stock.watering_step || '-';
-        const avg_prc = parseInt(parseNum(stock.pchs_avg_pric || stock.avg_prc));
+        const avg_prc = parseInt(parseNum(stock.avg_prc || stock.pchs_avg_pric));
         const rateClass = rate >= 0 ? 'profit-cell' : 'loss-cell';
         const pnlClass = pnl >= 0 ? 'profit-cell' : 'loss-cell';
 

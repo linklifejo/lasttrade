@@ -393,7 +393,7 @@ def get_current_status(mode='MOCK'):
 							qty = int(stock.get('rmnd_qty', 0))
 							if qty <= 0: continue
 							
-							api_avg = float(stock.get('pchs_avg_pric', 0))
+							api_avg = float(stock.get('avg_prc', 0))
 							avg_price = api_avg if api_avg > 0 else avg_prices_from_db.get(code, 0)
 							cur_price = float(stock.get('cur_prc', avg_price))
 							
