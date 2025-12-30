@@ -32,17 +32,17 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	rsi_1m = None
 	rsi_3m = None
 	
-	# [쿨타임 체크] 같은 종목을 너무 자주 매수하는 것을 방지 (기본 10분)
-	# [쿨타임 체크] 같은 종목을 너무 자주 매수하는 것을 방지 (10분 -> 30초로 단축)
-	# [쿨타임 체크] 같은 종목을 너무 자주 매수하는 것을 방지 (10분 -> 5초로 단축)
-	buy_cooldown = 5 # 5초 (재진입 방지)
+	# [쿨타임 체크] 같은 종목을 너무 자주 매수하는 것을 방지
+	# [안정성 개선] 5초 -> 60초로 증가 (과도한 매수 방지)
+	buy_cooldown = 60 # 60초 (재진입 방지)
 	last_time = last_buy_times.get(stk_cd, 0)
 	if time.time() - last_time < buy_cooldown:
 		logger.info(f"[매수 스킵] {stk_cd}: 매수 쿨타임 중 ({int(buy_cooldown - (time.time() - last_time))}초 남음)")
 		return False
 
 	# [재매수 방지] 최근 매도한 종목은 일정 시간 동안 재매수 금지
-	sell_wait = int(get_setting('sell_rebuy_wait_seconds', 30)) # 초 단위 직접 사용
+	# [안정성 개선] 30초 -> 60초로 증가 (API 반영 지연 대응)
+	sell_wait = int(get_setting('sell_rebuy_wait_seconds', 60)) # 초 단위 직접 사용
 	last_sold_time = last_sold_times.get(stk_cd, 0)
 	if last_sold_time > 0:
 		elapsed = time.time() - last_sold_time
@@ -61,9 +61,8 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		logger.warning(f"[매수 금지] {stk_cd}: 현재 매도 중(stocks_being_sold)인 종목입니다.")
 		return False
 
-	# [New] 안전장치: stocks_being_sold가 너무 비대해지는 것 방지 (5% 확률로 정리)
-	import random
-	if random.random() < 0.05:
+	# [안정성 개선] stocks_being_sold 유령 종목 매 루프 정리 (5% 확률 -> 100%)
+	if True:  # 매번 정리
 		try:
 			if outstanding_orders is not None:
 				selling_codes = {normalize_stock_code(o.get('stk_cd', '')) for o in outstanding_orders if o.get('type') == 'sell' or o.get('ord_tp') == '02'}
@@ -370,13 +369,11 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 			logger.info(f"[매수 스킵] {stk_cd}: 보유 종목 수({my_stocks_count}개)가 목표({int(target_cnt)}개)에 도달하여 신규 매수 금지")
 			return False
 
-		# [신규] 초기 매수 비율 설정 로드 (기본 10%)
-		initial_buy_ratio = float(get_setting('initial_buy_ratio', 10.0)) / 100.0
-		logger.info(f"[초기 매수] {stk_cd}: 초기 매수 비율 {initial_buy_ratio*100:.1f}% 적용")
-		
-		# 1차 매수 비율 적용 (초기 매수 비율 반영)
-		target_ratio_1st = cumulative_ratios[0] * initial_buy_ratio
+		# [수정] 1:1:2:2:4 비율대로 직접 매수 (initial_buy_ratio 제거)
+		# 1단계 = 전체 할당액의 10% (가중치 1/10)
+		target_ratio_1st = cumulative_ratios[0]
 		one_shot_amt = alloc_per_stock * target_ratio_1st
+		logger.info(f"[신규 매수] {stk_cd}: 1단계 비율 {target_ratio_1st*100:.1f}% 적용")
 		
 		# [수정] 최소 매수 금액 보장 (고가 주식도 매수 가능하도록)
 		# 1차 매수 금액이 너무 작으면 최소 5만원으로 상향 조정
@@ -391,7 +388,7 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 			return False
 
 		expense = one_shot_amt
-		msg_reason = f"신규 매수 (초기 {initial_buy_ratio*100:.0f}%)"
+		msg_reason = f"신규 매수 (1단계 {target_ratio_1st*100:.0f}%)"
 		logger.info(f"[{msg_reason}] {stk_cd}: 매수 진행 (목표: {one_shot_amt:,.0f}원, 전체 할당(가중): {alloc_per_stock:,.0f}원)")
 
 	else:
@@ -429,7 +426,7 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		actual_current_step = 0
 		for i, threshold in enumerate(cumulative_ratios):
 			# 실제 투입된 돈이 목표 비중의 90% 이상이면 해당 단계 인정
-			if cur_pchs_amt >= (alloc_per_stock * threshold * 0.90):
+			if cur_pchs_amt >= (alloc_per_stock * threshold * 0.95):  # 90% -> 95% (정확도 향상)
 				actual_current_step = i + 1
 		
 		# UI 표시용 단계 (최대 split_cnt로 제한)

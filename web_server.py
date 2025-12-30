@@ -385,7 +385,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json(data)
             except Exception as e:
                 pass # 연결 종료 등 예외 처리
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)  # 0.5초 -> 1초 (서버 부하 감소)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
