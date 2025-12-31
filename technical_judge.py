@@ -25,21 +25,6 @@ class TechnicalJudge:
         score = 0
         reasons = []
         
-        # 0. 학습된 기준값 로드 (밤에 공부한 결과 반영)
-        rsi_limit = TechnicalJudge.get_weight('optimal_rsi_threshold', 30.0)
-        
-        # 1. RSI 성향 체크
-        rsi = indicators['rsi']
-        if rsi:
-            if rsi < rsi_limit: 
-                score += 20
-                reasons.append(f"RSI 최적 구간 진입({rsi:.1f} < {rsi_limit:.1f})")
-            elif rsi > 75:
-                score -= 30
-                reasons.append(f"RSI 과매수 구간({rsi:.1f})")
-            else:
-                score += 10
-                
         # 2. 이격도 체크 (단기 과열 여부)
         disp5 = indicators['disparity_5']
         if disp5 > 105: # MA5보다 5% 이상 높으면 추격 매수 위험
