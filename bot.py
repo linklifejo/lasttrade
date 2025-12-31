@@ -136,13 +136,20 @@ class MainApp:
 				logger.error(f"⚠️ 데이터 정리 오류: {e}")
 		
 		# 1. 자동 시작 처리
+		# Mock 모드이거나 장중이면 자동 시작
 		if auto_start and not self.manual_stop:
-			# 장중인데 아직 연결 안됨 -> 시작 시도
-			if MarketHour.is_market_open_time():
+			is_mock = get_setting('use_mock_server', True)
+			
+			# [Fix] Mock 모드에서는 날짜 변경 시에도 즉시 재시작
+			if is_mock or MarketHour.is_market_open_time():
 				if not self.chat_command.rt_search.connected:
 					logger.info(f"장중 자동 시작 실행 (연결 없음) - start 명령을 실행합니다.")
 					await self.chat_command.start()
 					self.today_started = True
+				elif not self.today_started:
+					# 이미 연결되어 있는데 플래그만 꺼진 경우 (날짜 변경 등)
+					self.today_started = True
+					logger.info("날짜 변경 감지 - 장중 상태 유지")
 			
 			# 장전인데 아직 플래그가 안 켜졌으면 (로그 출력용)
 			elif not self.today_started:

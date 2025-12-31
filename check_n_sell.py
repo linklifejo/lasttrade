@@ -357,6 +357,17 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				check_n_buy.last_sold_times[stock_code] = time.time()
 				logger.info(f"[매도 기록] {stock_code}: 재매수 쿨다운 시작")
 
+				# [New] 실시간 학습 트리거 (매도 발생 시 즉시 학습)
+				try:
+					import subprocess, sys, os
+					# 비동기 실행 (결과 기다리지 않음)
+					python_executable = sys.executable
+					script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'learn_daily.py')
+					subprocess.Popen([python_executable, script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+					logger.info("🧠 [Real-Time Learning] 매도 발생 -> 즉시 학습 트리거 완료")
+				except Exception as le:
+					logger.error(f"실시간 학습 트리거 실패: {le}")
+
 		return True, sold_stocks, holdings_codes, sell_reasons  # (성공여부, 매도리스트, 현재보유리스트, 매도사유)
 
 	except Exception as e:
