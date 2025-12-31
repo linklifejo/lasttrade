@@ -378,8 +378,17 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		logger.info(f"[신규 매수] {stk_cd}: 1단계 비율 {target_ratio_1st*100:.1f}% 적용")
 		
 		# [수정] 최소 매수 금액 보장 (고가 주식도 매수 가능하도록)
-		# 1차 매수 금액이 너무 작으면 최소 5만원으로 상향 조정
-		MIN_PURCHASE_AMOUNT = 50000
+		# [수정] 최소 매수 금액 보장 (설정값 연동)
+		# 사용자가 설정한 최소 주문 금액을 불러옴 (기본값: 50,000원)
+		min_buy_setting = get_setting('min_purchase_amount', 50000)
+		try:
+			MIN_PURCHASE_AMOUNT = int(str(min_buy_setting).replace(',', ''))
+		except:
+			MIN_PURCHASE_AMOUNT = 50000
+			
+		if one_shot_amt < MIN_PURCHASE_AMOUNT:
+			logger.info(f"[자금 조정] 1차 매수액({one_shot_amt:,.0f}원)이 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미만 → 상향 조정")
+			one_shot_amt = MIN_PURCHASE_AMOUNT
 		if one_shot_amt < MIN_PURCHASE_AMOUNT:
 			logger.info(f"[자금 조정] 1차 매수액({one_shot_amt:,.0f}원)이 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미만 → 상향 조정")
 			one_shot_amt = MIN_PURCHASE_AMOUNT

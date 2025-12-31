@@ -495,7 +495,11 @@ class RealTimeSearch:
 							await asyncio.sleep(0.5)
 							
 							c_balance_raw = await loop.run_in_executor(None, get_balance, 'N', '', self.token)
-							c_balance_data = {'deposit': c_balance_raw[2]} if c_balance_raw else None
+							# [Fix] net_asset 필드 누락으로 인한 자산 0원 인식 오류 수정
+							c_balance_data = {
+								'deposit': c_balance_raw[2],
+								'net_asset': c_balance_raw[1] # Mock: total_eval (cash + holdings)
+							} if c_balance_raw else None
 							await asyncio.sleep(0.5)
 							
 							out_orders = await loop.run_in_executor(None, api.get_outstanding_orders, self.token)
@@ -770,17 +774,15 @@ class RealTimeSearch:
 				
 			try:
 				import random
-				# [Mod] 사용자 요청: 종목 다양화 + 저가 종목 추가 (활발한 매매를 위해)
-				# 고가, 중가, 저가 종목 골고루 포함 (36개)
+				# [Mod] 사용자 요청: 저가/동전주 전용 리스트 (비싼 종목 제거)
 				mock_stocks = [
 					# 대형 고가주
 					'005930', '000660', '035420', '051910', '068270', '006400', '005490', 
 					# 중형 중가주
 					'035720', '105560', '055550', '000270', '005380', '012330', '028260',
 					'096770', '009540', '003550', '066570', '018260', '352820',
-					# 저가주 (활발한 매매)
-					'015760', '034020', '010140', '000720', '011200', '003490', '009830',
-					'017670', '011170', '010950', '086790', '009150', '032830', '000810', '259960'
+					# 저가주
+					'003280', '001250', '001520', '000890', '000040', '003850', '010100', '000320', '005110'
 				]
 				# 한 번에 3~7개 발견 (더 활발하게)
 				selected = random.sample(mock_stocks, min(random.randint(3,7), len(mock_stocks)))
