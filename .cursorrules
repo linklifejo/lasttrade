@@ -1,7 +1,13 @@
-# User Rules
+# Project Rules: lasttrade
 
 1. **Language**: Always communicate in Korean (한글로 대화).
-2. **Precision**: 수정을 아주 세심하게 요구내용만 한다. 아니면 질문한다. (Perform modifications very meticulously and only on the requested content. Otherwise, ask questions.)
-3. **Git Management**: 사용자가 "처리해라" 등의 명시적인 요청을 할 때, 현재까지의 변경 사항을 Git에 반영(add, commit, push)하여 GitHub와 동기화한다.
-4. **Onboarding**: 새로운 대화가 시작되거나 모델이 변경되면, 반드시 최우선으로 `trading_rules.md`를 필독하여 프로젝트의 고유 정체성(키움 REST API 이름으로 운영되나 기술적으로 한국투자증권 시스템이 통합된 특수 배경 등)을 완전히 파악한 후 작업을 시작한다. 함부로 파일을 삭제하거나 설계를 변경하지 않는다.
-5. **Approval**: 수정을 진행하기 전에는 반드시 "수정할까요?"라고 질문하여 사용자의 명확한 승인을 얻은 후 작업을 시작한다. 독단적인 판단으로 코드를 수정하지 않는다.
+2. **Precision**: 수정을 아주 세심하게 요구내용만 한다. 논리적 비약이 있거나 불확실하면 반드시 질문한다. (Perform modifications very meticulously and only on the requested content. If there's a logical leap or uncertainty, always ask questions.)
+3. **Identity & Naming**: 본 시스템은 대외적으로 '키움 REST API'라는 명칭을 사용하나, 기술적으로는 한국투자증권(KIS)의 REST API 구조를 따르고 있다. 코드 내에서 이를 '수정'하려 들지 말고, 기존의 명칭 체계를 그대로 유지한다.
+4. **Trading Strategy Continuity**:
+    - **1:1:2:2:4:4... 수열**: 분할 매수 가중치 수열은 시스템의 핵심 자금 관리 원칙이다. 이를 임의로 수정하거나 단순화하지 않는다.
+    - **WATER/FIRE 전략**: `check_n_buy.py` 및 `check_n_sell.py`에 구현된 물타기(WATER)/불타기(FIRE) 로직의 핵심 파라미터는 `trading_rules.md`를 기준으로 하며, 로직 수정 시 이 문서의 원칙과 일치하는지 확인한다.
+5. **Mathematical Engine Safety**: `math_analyzer.py`나 `technical_judge.py` 등 수학적/기술적 분석 엔진을 수정할 때는 기존의 확률론적 접근 방식을 존중하며, 파라미터 최적화 시 `/math-analysis` 워크플로우를 참고한다.
+6. **Onboarding & Rules**: 새로운 대화나 모델 변경 시, `trading_rules.md`를 최우선으로 읽고 시스템의 매매 원칙을 숙지한다. 함부로 파일을 삭제하거나 기본 설계를 변경하지 않는다.
+7. **Git Management**: 사용자가 "처리해라", "커밋해라", "완료" 등의 명시적인 요청을 할 때만 변경 사항을 Git에 반영(add, commit)한다.
+8. **Approval**: 수정을 진행하기 전에는 반드시 "수정할까요?"라고 질문하여 사용자의 명확한 승인을 얻는다. 독단적인 매매 로직 수정은 엄격히 금지된다.
+9. **Dashboard & Web**: `web_server.py` 및 `static/` 내의 프론트엔드 코드 수정 시, 실시간 데이터 정합성과 사용자 경험(UX)을 최우선으로 고려하며, `watchdog.py`와의 연동성을 깨뜨리지 않도록 주의한다.

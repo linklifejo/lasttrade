@@ -108,10 +108,12 @@ class MockKiwoomAPI(KiwoomAPI):
                         logger.info(f"🎮 [Scenario Change] 신규 시나리오 활성화: {row['name']} ({scenario_type})")
                 else:
                     scenario_type = 'RANDOM'
-                    params = {"volatility": 0.8}
+                    v_rate = get_setting('mock_volatility_rate', 0.8)
+                    params = {"volatility": float(v_rate)}
 
             # 2. 가격 업데이트 로직
-            volatility = float(params.get('volatility', 0.8)) / 100.0
+            vol_val = params.get('volatility', 0.8)
+            volatility = float(vol_val) / 100.0
             
             with get_db_connection() as conn:
                 cursor = conn.execute('SELECT p.code, p.current, s.base_price FROM mock_prices p JOIN mock_stocks s ON p.code = s.code')

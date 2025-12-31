@@ -1332,7 +1332,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Restore last view or default to dashboard
-    const lastView = localStorage.getItem('activeView') || 'dashboard';
+    let lastView = localStorage.getItem('activeView') || 'dashboard';
+    if (lastView === 'credentials') lastView = 'settings';
     showView(lastView);
 
     // --- Tab Switching Logic (Internal to Reports Page) ---

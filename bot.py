@@ -115,6 +115,25 @@ class MainApp:
 			self.today_started = False
 			self.today_stopped = False
 			self.last_check_date = today
+			
+			# [NEW] 새로운 날 시작 시 전일 데이터 정리
+			logger.info("🧹 새로운 날 감지 - 전일 데이터 정리 시작")
+			try:
+				import subprocess
+				import sys
+				result = subprocess.run(
+					[sys.executable, 'cleanup_daily.py'],
+					cwd=os.path.dirname(os.path.abspath(__file__)),
+					capture_output=True,
+					text=True,
+					timeout=60
+				)
+				if result.returncode == 0:
+					logger.info("✅ 전일 데이터 정리 완료")
+				else:
+					logger.error(f"⚠️ 데이터 정리 실패: {result.stderr}")
+			except Exception as e:
+				logger.error(f"⚠️ 데이터 정리 오류: {e}")
 		
 		# 1. 자동 시작 처리
 		if auto_start and not self.manual_stop:
@@ -136,6 +155,28 @@ class MainApp:
 			await self.chat_command.stop(False)  # auto_start를 false로 설정하지 않음
 			logger.info("자동으로 계좌평가 보고서를 발송합니다.")
 			await self.chat_command.report()  # 장 종료 시 report도 자동 발송
+			
+			# [NEW] 장 종료 후 AI 학습 실행
+			logger.info("🤖 AI 학습 시작 (당일 데이터)")
+			try:
+				import subprocess
+				import sys
+				result = subprocess.run(
+					[sys.executable, 'learn_daily.py'],
+					cwd=os.path.dirname(os.path.abspath(__file__)),
+					capture_output=True,
+					text=True,
+					timeout=300  # 5분 타임아웃
+				)
+				if result.returncode == 0:
+					logger.info("✅ AI 학습 완료")
+					if result.stdout:
+						logger.info(f"학습 결과:\n{result.stdout}")
+				else:
+					logger.error(f"⚠️ AI 학습 실패: {result.stderr}")
+			except Exception as e:
+				logger.error(f"⚠️ AI 학습 오류: {e}")
+			
 			self.today_stopped = True  # 오늘 stop 실행 완료 표시
 
 	async def check_web_command(self):

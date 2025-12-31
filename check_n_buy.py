@@ -261,7 +261,9 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		math_weight = max(0.8, min(1.5, math_weight)) # 너무 급격한 축소는 방지 (최소 0.8배)
 		logger.info(f"⚖️ [Math Weight] 기대 승률 가중치 적용: {math_weight:.2f}x (승률 {win_prob*100:.1f}%)")
 	else:
-		logger.info(f"ℹ️ [Math Filter] 표본 수가 부족하여({sample_count}/{min_count}) 가중치 없이 기본 비중 사용")
+		# [Fix] 데이터가 부족한 경우(신규 세션 등) 매수를 차단하지 않고 기본 가중치로 진행 (눈을 뜨게 함)
+		logger.info(f"ℹ️ [Math Filter] 표본 수 부족({sample_count}/{min_count}) - 기본 비중(1.0x)으로 매수 진행")
+		math_weight = 1.0
 
 	# [자산 데이터 정리] 위에서 이미 계산된 balance와 net_asset 사용
 	# net_asset = 예수금(deposit_amt) + 주식평가금(stock_val)

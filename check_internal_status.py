@@ -19,7 +19,9 @@ def check():
     print(settings)
     
     # 상태 조회 (system_status 테이블)
-    cursor.execute("SELECT status_json FROM system_status WHERE id = 1")
+    # 현재 설정에 따른 모드 가져오기
+    mode = 'MOCK' if settings.get('use_mock_server') == 'true' else 'REAL'
+    cursor.execute("SELECT status_json FROM system_status WHERE UPPER(api_mode) = ?", (mode,))
     row = cursor.fetchone()
     if row:
         status = json.loads(row['status_json'])

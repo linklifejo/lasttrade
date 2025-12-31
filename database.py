@@ -121,6 +121,18 @@ async def init_db():
 				base_price INTEGER NOT NULL
 			)
 		''')
+
+		# Mock 가격 정보 테이블
+		await db.execute('''
+			CREATE TABLE IF NOT EXISTS mock_prices (
+				code TEXT PRIMARY KEY,
+				current INTEGER NOT NULL,
+				open INTEGER,
+				high INTEGER,
+				low INTEGER,
+				last_update TEXT
+			)
+		''')
 		
 		# 실시간 상태 테이블 (모드별 분리 저장)
 		await db.execute('''
