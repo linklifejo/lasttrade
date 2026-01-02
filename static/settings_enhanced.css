@@ -1,4 +1,4 @@
-/* Revamped Premium Settings UI - Glassmorphism & Modern Aesthetic */
+/* Revamped Premium Settings UI - Glassmorphism & Modern Aesthetic - EXTRA LARGE */
 
 :root {
     --premium-purple: #8b5cf6;
@@ -10,7 +10,7 @@
 }
 
 #view-settings {
-    padding: 10px 15px;
+    padding: 15px 20px;
     background: radial-gradient(circle at top right, rgba(139, 92, 246, 0.1), transparent),
         radial-gradient(circle at bottom left, rgba(99, 102, 241, 0.1), transparent);
     min-height: 100vh;
@@ -18,12 +18,13 @@
 
 .settings-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 12px;
-    margin-top: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    /* Increased min-width significantly */
+    gap: 16px;
+    margin-top: 15px;
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1400px) {
     .settings-container {
         grid-template-columns: repeat(3, 1fr);
     }
@@ -34,8 +35,9 @@
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--premium-border);
-    border-radius: 16px;
-    padding: 15px;
+    border-radius: 20px;
+    padding: 25px;
+    /* More padding */
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
 }
@@ -48,20 +50,22 @@
 .card-header {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 15px;
+    gap: 15px;
+    margin-bottom: 25px;
     border-bottom: 1px solid var(--premium-border);
-    padding-bottom: 10px;
+    padding-bottom: 20px;
 }
 
 .category-icon {
-    font-size: 1.4rem;
+    font-size: 2.2rem;
+    /* Huge icon */
     filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.5));
 }
 
 .card-header h3 {
-    font-size: 1.1rem;
-    font-weight: 700;
+    font-size: 1.8rem;
+    /* Huge Title */
+    font-weight: 800;
     color: var(--premium-text);
     margin: 0;
 }
@@ -69,17 +73,19 @@
 .settings-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 18px;
+    /* More spacing */
 }
 
 .setting-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding: 8px 10px;
+    gap: 20px;
+    padding: 16px 20px;
+    /* Big padding */
     background: rgba(255, 255, 255, 0.03);
-    border-radius: 10px;
+    border-radius: 14px;
     transition: background 0.2s ease;
 }
 
@@ -90,19 +96,22 @@
 .setting-info {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
     flex: 1;
 }
 
 .setting-label {
-    font-size: 0.9rem;
-    font-weight: 600;
+    font-size: 1.6rem;
+    /* Huge label */
+    font-weight: 700;
     color: var(--premium-text);
 }
 
 .setting-desc {
-    font-size: 0.75rem;
+    font-size: 1.2rem;
+    /* Readable desc */
     color: var(--premium-desc);
+    line-height: 1.5;
 }
 
 /* Premium Form Elements */
@@ -110,15 +119,14 @@
 .premium-input {
     background: rgba(15, 15, 25, 0.85);
     border: 1px solid var(--premium-border);
-    border-radius: 8px;
-    /* 더 둥글게 */
+    border-radius: 12px;
     color: white;
-    padding: 10px 14px;
-    /* 크기 키움 */
-    font-size: 1rem;
-    /* 폰트 키움 */
-    min-width: 140px;
-    /* 더 넓게 */
+    padding: 14px 20px;
+    /* Huge padding */
+    font-size: 1.6rem;
+    /* Huge font */
+    font-weight: 600;
+    min-width: 180px;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -127,11 +135,10 @@
 .premium-select {
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: right 12px center;
-    padding-right: 40px;
-    /* 화살표 공간 */
+    background-position: right 16px center;
+    padding-right: 50px;
 }
 
 .premium-select:hover,
@@ -147,23 +154,6 @@
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.25);
     background: rgba(40, 40, 60, 1);
-}
-
-/* Buttons */
-/* removed pulse pulse-glow */
-
-@keyframes pulse-glow {
-    0% {
-        box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4);
-    }
-
-    70% {
-        box-shadow: 0 0 0 10px rgba(139, 92, 246, 0);
-    }
-
-    100% {
-        box-shadow: 0 0 0 0 rgba(139, 92, 246, 0);
-    }
 }
 
 .btn-save-large {
@@ -186,23 +176,20 @@
     transform: scale(0.98);
 }
 
-/* removed animations and empty ruleset */
-
-/* Toast Customization Integration */
 .toast-container {
     padding: 20px;
 }
 
-/* Spinner for buttons */
 .spinner-small {
     display: inline-block;
-    width: 14px;
-    height: 14px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+    width: 18px;
+    /* Bigger spinner */
+    height: 18px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
     border-radius: 50%;
     border-top-color: white;
     animation: spin 0.8s linear infinite;
-    margin-right: 8px;
+    margin-right: 10px;
     vertical-align: middle;
 }
 
@@ -211,5 +198,3 @@
         transform: rotate(360deg);
     }
 }
-
-/* Removed redundant action bar styles */
