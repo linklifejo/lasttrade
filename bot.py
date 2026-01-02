@@ -541,39 +541,43 @@ class MainApp:
 					
 					item['evlt_amt'] = evlt_amt
 					
-					# 평가손익 (pl_amt)
+					# [Fix] 2. 평가손익 (pl_amt) - API 원본 우선 사용
 					pl_amt = 0
 					try:
+						# API 필드: pl_amt 또는 evlu_pfls_amt
 						pl_str = str(s.get('pl_amt', s.get('evlu_pfls_amt', '0'))).replace(',', '')
 						pl_amt = int(float(pl_str))
 					except: pass
 					
-					# [Fix] 평균가/현재가 재검증 (데이터 불일치 방지)
-					pur_amt = int(float(s.get('pchs_amt', 0)))
-					evlt_amt = int(float(s.get('evlu_amt', 0)))
-					avg_prc = float(s.get('pchs_avg_pric', 0)) # [New] 평균가 가져오기
-					pl_amt = evlt_amt - pur_amt
-					pl_rt = (pl_amt / pur_amt * 100) if pur_amt > 0 else 0
+					# UI 전달용 평균가
+					item['pchs_avg_pric'] = int(avg_prc)
+
+					# [재계산 로직 개선] 
+					# API 원본 pl_amt가 0이고, 현재가가 정상적으로 있을 때만 재계산
+					if pl_amt == 0 and cur_prc > 0 and pur_amt > 0:
+						# 재계산: (현재가 - 평단가) * 수량 (이 방식이 가장 정확함)
+						pl_amt = int((cur_prc - avg_prc) * qty)
 					
-					item['pchs_avg_pric'] = int(avg_prc) # UI 전달용 추가
-					
-					# [재계산] 평가손익 재계산 (현재가 보정 반영)
-					# API 값이 신뢰성이 떨어지므로 직접 계산이 안전함
-					if pur_amt > 0:
-						pl_amt = evlt_amt - pur_amt
 					item['pl_amt'] = pl_amt
 					
-					# [Fix] 총 합계 누적 (중복 합산 방지를 위해 여기서 한 번만 수행)
+					# [Fix] 총 합계 누적
 					total_eval_sum += evlt_amt
 					total_pl_sum += pl_amt
 					total_buy_sum += pur_amt
 					
-					# 수익률 (pl_rt)
+					# 3. 수익률 (pl_rt) - API 원본 우선 사용
 					pl_rt = 0.0
-					if pur_amt > 0:
+					try:
+						# API 필드: pl_rt 또는 pfit_rt
+						rt_str = str(s.get('pl_rt', s.get('pfit_rt', '0'))).replace(',', '')
+						pl_rt = float(rt_str)
+					except: pass
+
+					# API 수익률이 0이면 직접 계산
+					if pl_rt == 0.0 and pur_amt > 0:
 						pl_rt = ((evlt_amt - pur_amt) / pur_amt) * 100
 					
-					# [Safety] 수익률이 -90% 밑이면 데이터 오류 가능성 높음 -> 0% 처리
+					# [Safety] 수익률이 -90% 밑이면 데이터 오류 가능성 -> 0% 처리
 					if pl_rt < -90.0:
 						pl_rt = 0.0
 						
