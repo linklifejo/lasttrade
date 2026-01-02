@@ -2,7 +2,9 @@
 
 1. **Language**: Always communicate in Korean (한글로 대화).
 2. **Precision**: 수정을 아주 세심하게 요구내용만 한다. 논리적 비약이 있거나 불확실하면 반드시 질문한다. (Perform modifications very meticulously and only on the requested content. If there's a logical leap or uncertainty, always ask questions.)
-3. **Identity & Naming**: 본 시스템은 대외적으로 '키움 REST API'라는 명칭을 사용하나, 기술적으로는 한국투자증권(KIS)의 REST API 구조를 따르고 있다. 코드 내에서 이를 '수정'하려 들지 말고, 기존의 명칭 체계를 그대로 유지한다.
+3. **Identity & Library Integrity**:
+    - 본 시스템은 대외적으로 '키움 REST API'라는 명칭을 사용하나, 기술적으로는 한국투자증권(KIS)의 REST API 구조를 따르고 있다. 코드 내에서 이를 '수정'하려 들지 말고, 기존의 명칭 체계를 그대로 유지한다.
+    - **[CRITICAL] 절대 금지: `kiwoom/` 디렉토리 내의 API 라이브러리 파일들(`real_api.py` 등)은 절대로 수정하지 않는다.** API 통신 방식이나 ID 값(예: `kt10000`)을 임의로 변경하면 시스템 전체에 치명적인 오류를 초래할 수 있다. 버그가 의심되면 반드시 사용자에게 먼저 보고한다.
 4. **Trading Strategy Continuity**:
     - **1:1:2:2:4:4... 수열**: 분할 매수 가중치 수열은 시스템의 핵심 자금 관리 원칙이다. 이를 임의로 수정하거나 단순화하지 않는다.
     - **WATER/FIRE 전략**: `check_n_buy.py` 및 `check_n_sell.py`에 구현된 물타기(WATER)/불타기(FIRE) 로직의 핵심 파라미터는 `trading_rules.md`를 기준으로 하며, 로직 수정 시 이 문서의 원칙과 일치하는지 확인한다.

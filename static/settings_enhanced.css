@@ -160,10 +160,19 @@
     background: linear-gradient(135deg, var(--premium-purple), var(--premium-indigo));
     color: white;
     border: none;
-    font-weight: 700;
+    font-weight: 800;
+    /* Bolder */
+    font-size: 1.8rem;
+    /* Larger font */
+    padding: 20px 40px;
+    /* Massive padding */
+    border-radius: 12px;
     letter-spacing: 0.5px;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    width: 100%;
+    /* Full width */
+    margin-top: 20px;
 }
 
 .btn-save-large:hover {
