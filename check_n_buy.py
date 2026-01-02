@@ -23,7 +23,7 @@ last_sold_times = {}
 # [추가] 종목별 누적 매수 금액 추적 (API 잔고 반영 지연 시 오버 매수 방지)
 accumulated_purchase_amt = {}
 # 매수 체크 함수
-def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None):
+def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None):
 	global accumulated_purchase_amt # 전역 변수 사용
 	global last_sold_times # 매도 시간 추적용
 	
@@ -237,7 +237,8 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	
 	# [Math Probability Filter] 수학적 기대 승률 체크
 	from math_analyzer import get_win_probability
-	win_prob, sample_count = get_win_probability(rsi_1m)
+	rsi_diff = (rsi_1m - rsi_3m) if (rsi_1m is not None and rsi_3m is not None) else 0
+	win_prob, sample_count = get_win_probability(rsi_1m, rsi_diff)
 	
 	# 설정값 로드
 	min_prob = float(get_setting('math_min_win_rate', 0.55)) # 최소 승률 55%
@@ -285,13 +286,17 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	factors = {
 		'rsi_1m': rsi_1m,
 		'rsi_3m': rsi_3m,
-		'rsi_diff': (rsi_1m - rsi_3m) if (rsi_1m and rsi_3m) else 0,
+		'rsi_diff': rsi_diff,
 		'price': current_price,
 		'win_prob': win_prob,
 		'sample_count': sample_count,
 		'strategy': single_strategy,
 		'capital_ratio': capital_ratio
 	}
+	
+	# 실시간 정보 추가 (거래량, 체결강도 등)
+	if realtime_data:
+		factors.update(realtime_data)
 	
 	# 시그널 스냅샷 저장 (수학적 학습의 기초 데이터)
 	signal_id = log_signal_snapshot_sync(stk_cd, 'BUY_SIGNAL', factors)

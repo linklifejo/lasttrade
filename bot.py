@@ -56,6 +56,9 @@ class MainApp:
 		# [Math] response_manager 전달
 		self.chat_command.rt_search.response_manager = response_manager
 		
+		# [Heartbeat]
+		self._init_heartbeat()
+		
 	def load_held_times(self):
 		"""DB에서 보유 시간 로드"""
 		try:
@@ -65,6 +68,30 @@ class MainApp:
 		except Exception as e:
 			logger.error(f"보유 시간 DB 로드 실패: {e}")
 			self.held_since = {}
+
+	# [Heartbeat] 소켓 초기화
+	def _init_heartbeat(self):
+		import socket
+		self.hb_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		# self.hb_sock.setblocking(False) # Non-blocking
+		self.hb_addr = ('127.0.0.1', 5005)
+		self.last_hb_time = 0
+
+	def _send_heartbeat(self):
+		"""도그에게 생존 신고 (UDP 패킷 전송)"""
+		try:
+			now = time.time()
+			if now - self.last_hb_time > 2.0: # 2초마다 전송
+				msg = json.dumps({
+					"status": "alive",
+					"timestamp": now,
+					"pid": os.getpid()
+				}).encode('utf-8')
+				self.hb_sock.sendto(msg, self.hb_addr)
+				self.last_hb_time = now
+		except Exception as e:
+			# logger.debug(f"Heartbeat error: {e}")
+			pass
 
 	def save_held_times(self):
 		"""DB에 보유 시간 저장"""
@@ -402,6 +429,10 @@ class MainApp:
 
 		# 데이터 준비
 		deposit = 0
+		total_asset = 0 # [Fix] 초기화 추가
+		total_eval_sum = 0 # [Fix] 초기화 위치 이동
+		
+		# 예수금(Deposit) 추출
 		if balance_data: 
 			try: deposit = int(balance_data.get('deposit', 0) or 0)
 			except: deposit = 0
@@ -409,7 +440,6 @@ class MainApp:
 			try: deposit = int(current_balance[2] or 0)
 			except: deposit = 0
 
-		total_eval_sum = 0
 		total_pl_sum = 0
 		total_buy_sum = 0 # 실매입금 합계
 		status_holdings = []
@@ -736,6 +766,9 @@ class MainApp:
 		
 		try:
 			while self.keep_running:
+				# [Heartbeat] 생존 신고
+				self._send_heartbeat()
+
 				# [Mode Change Check] API 모드 변경 감지 및 토큰 갱신
 				current_api_mode = get_current_api_mode()
 				if self.last_api_mode != current_api_mode:
@@ -808,7 +841,9 @@ class MainApp:
 						loop = asyncio.get_running_loop()
 						
 						# 1. 데이터 업데이트 (최우선 실행)
+						self._send_heartbeat() # 긴 작업 시작 전 신호
 						current_stocks, current_balance, balance_data = await self._update_market_data(loop)
+						self._send_heartbeat() # 작업 직후 신호
 						
 						# [Fix] 데이터가 정상적으로 전달되지 않았을 경우 이번 루프 스킵
 						if current_stocks is None or balance_data is None:
@@ -849,8 +884,10 @@ class MainApp:
 							
 							# 물타기 (장중 매수 시간)
 							if MarketHour.is_market_buy_time():
+								self._send_heartbeat() # 매수 로직 진입 전
 								await self._process_watering_logic(current_stocks, balance_data, out_orders)
-							
+								self._send_heartbeat() # 매수 로직 완료 후
+								
 							# GUI 상태 업데이트
 							last_json_update = await self._update_status_json(current_stocks, balance_data, current_balance)
 							

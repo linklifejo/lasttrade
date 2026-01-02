@@ -144,6 +144,7 @@ class RealTimeSearch:
 									try:
 										jmcode = None
 										rate = 0.0
+										real_data = {}
 										
 										# 1. 종목 코드 추출
 										if trnm == 'REAL' and 'values' in item:
@@ -156,16 +157,28 @@ class RealTimeSearch:
 											if raw_price:
 												price = abs(int(str(raw_price).replace(',','')))
 												if jmcode: self.current_prices[jmcode.replace('A','')] = price
+											
+											# 추가 실시간 팩터 추출 (거래량 FID 13, 체결강도 FID 15 등)
+											try:
+												if v.get('13'): real_data['vol'] = int(str(v.get('13')).replace(',',''))
+												if v.get('15'): real_data['strength'] = float(str(v.get('15')).replace(',',''))
+											except: pass
 										else:
 											jmcode = item.get('stk_cd', item.get('jmcode', item.get('9001')))
 											rate = float(item.get('12', item.get('11', item.get('pl_rt', 0.0))))
+											# 초기조회(CNSRREQ) 시에도 데이터가 있으면 추출
+											try:
+												if item.get('13'): real_data['vol'] = int(str(item.get('13')).replace(',',''))
+												if item.get('15'): real_data['strength'] = float(str(item.get('15')).replace(',',''))
+											except: pass
 
 										if jmcode:
 											jmcode = str(jmcode).replace('A', '')
 											# [Filter] 이미 보유 중인 종목은 대기열에 넣지 않음
 											if jmcode not in self.purchased_stocks:
 												parsed_items.append({'code': jmcode, 'rate': rate})
-												self.candidate_queue[jmcode] = rate
+												# 대기열에 [등락률, 추가데이터] 형태로 저장
+												self.candidate_queue[jmcode] = (rate, real_data)
 									except: continue
 								
 								if parsed_items:
@@ -434,27 +447,22 @@ class RealTimeSearch:
 			# Priority Sort (Rate Descending)
 			sorted_items = []
 			if isinstance(self.candidate_queue, dict):
-				sorted_items = sorted(self.candidate_queue.items(), key=lambda x: x[1], reverse=True)
+				# (code, (rate, data)) -> sort by rate
+				sorted_items = sorted(self.candidate_queue.items(), key=lambda x: x[1][0] if isinstance(x[1], tuple) else x[1], reverse=True)
 			else:
-				# Fallback (Should not happen if initialized correctly)
-				sorted_items = [(x, 0) for x in self.candidate_queue]
+				sorted_items = [(x, (0, {})) for x in self.candidate_queue]
 			
-			# Select All (Try one by one until target reached)
-			candidates = [x[0] for x in sorted_items]
+			# Select All
+			candidates_info = [(x[0], x[1][1] if isinstance(x[1], tuple) else {}) for x in sorted_items]
 			
-			# Remove Selected & Clear Queue (선택된 것 처리하고 나머지는 버림 - Freshness 유지)
+			# Remove Selected & Clear Queue
 			self.candidate_queue.clear()
 			
-			for code in candidates:
+			for code, r_data in candidates_info:
 				# [Fix] 이미 보유 중인 종목은 신규 진입 대상에서 제외
 				if code in self.purchased_stocks:
 					logger.info(f"[Selection Skip] {code}: 이미 보유 중이므로 대기열에서 제거")
 					continue
-
-				# [Time-Cut Cooldown] Removed hardcoded 90s cooldown.
-				# Now relies on settings.json 'sell_rebuy_wait_minutes' (which is 0)
-				# If we need to respect the setting here, we check sell_rebuy_wait_minutes.
-				pass
 
 				# 매수 진행 중 체크
 				if code in self.buying_stocks: continue
@@ -472,33 +480,30 @@ class RealTimeSearch:
 				self.buying_stocks.add(code)
 				self.buy_last_time[code] = time.time()
 				
-				logger.info(f"[Priority Pick] {code} 선정 (Rate 확인 불가/Dict참조) -> 매수 시도")
+				logger.info(f"[Priority Pick] {code} 선정 -> 매수 시도")
 
 				# chk_n_buy 호출 (Lock 사용)
 				async with self.buy_lock:
 					try:
-						# 다시 한 번 수량 체크 (Lock 획득 대기 중에 채워졌을 수 있음)
+						# 다시 한 번 수량 체크
 						if len(self.purchased_stocks) >= target_cnt:
 							logger.info(f"[Lock 획득 후 중단] 목표 수량 달성 ({len(self.purchased_stocks)}/{target_cnt}) - {code} 매수 취소")
 							break
 							
-						# [Fix] API 호출 최적화: chk_n_buy 호출 시 중복 조회 방지
-						# 필요한 데이터(current_stocks, balance_data, outstanding_orders) 조회
+						# [Fix] API 호출 최적화
 						try:
 							from kiwoom_adapter import get_api, get_account_data, get_balance
 							api = get_api()
 							loop = asyncio.get_event_loop()
 							
-							# 순차 조회로 1700 방지
 							c_stocks_data = await loop.run_in_executor(None, get_account_data, 'N', '', self.token)
 							c_stocks = c_stocks_data[0] if c_stocks_data else []
 							await asyncio.sleep(0.5)
 							
 							c_balance_raw = await loop.run_in_executor(None, get_balance, 'N', '', self.token)
-							# [Fix] net_asset 필드 누락으로 인한 자산 0원 인식 오류 수정
 							c_balance_data = {
 								'deposit': c_balance_raw[2],
-								'net_asset': c_balance_raw[1] # Mock: total_eval (cash + holdings)
+								'net_asset': c_balance_raw[1]
 							} if c_balance_raw else None
 							await asyncio.sleep(0.5)
 							
@@ -508,7 +513,7 @@ class RealTimeSearch:
 							c_stocks, c_balance_data, out_orders = None, None, None
 
 						success = await asyncio.get_event_loop().run_in_executor(
-							None, chk_n_buy, code, self.token, c_stocks, c_balance_data, self.held_since_ref, out_orders, self.response_manager
+							None, chk_n_buy, code, self.token, c_stocks, c_balance_data, self.held_since_ref, out_orders, self.response_manager, r_data
 						)
 						
 						if success:

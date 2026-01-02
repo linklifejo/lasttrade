@@ -7,6 +7,7 @@ import webbrowser
 # [설정] 실행할 스크립트
 WEB_SERVER_SCRIPT = "web_server.py"
 BOT_SCRIPT = "bot.py"
+WATCHDOG_SCRIPT = "watchdog.py"
 
 # stop.py의 강력한 종료 기능을 가져옵니다 (종료 시에만 사용)
 def cleanup_before_start():
@@ -28,12 +29,11 @@ def cleanup_before_start():
 
 
 def run_system():
-    """서버와 봇을 각각 별도 콘솔 창에서 실행"""
+    """서버와 워치독을 각각 별도 콘솔 창에서 실행 (봇은 워치독이 실행함)"""
     python_exe = sys.executable
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     server_path = os.path.join(script_dir, WEB_SERVER_SCRIPT)
-    bot_path = os.path.join(script_dir, BOT_SCRIPT)
     
     print(f"[+] Starting Mock Server...", end="", flush=True)
     server_proc = subprocess.Popen(
@@ -45,15 +45,16 @@ def run_system():
     
     time.sleep(1)
     
-    print(f"[+] Starting Trading Engine...", end="", flush=True)
-    bot_proc = subprocess.Popen(
-        [python_exe, bot_path], 
+    print(f"[+] Starting Watchdog (Heartbeat Guardian)...", end="", flush=True)
+    watchdog_path = os.path.join(script_dir, WATCHDOG_SCRIPT)
+    wd_proc = subprocess.Popen(
+        [python_exe, watchdog_path],
         cwd=script_dir,
         creationflags=subprocess.CREATE_NEW_CONSOLE
     )
     print(" Done.")
     
-    return server_proc, bot_proc
+    return server_proc, wd_proc
 
 def open_browser():
     """브라우저에서 대시보드 열기 (이미 열려있으면 새 탭 사용)"""
@@ -92,7 +93,7 @@ if __name__ == "__main__":
     time.sleep(1)
     
     # 2. 시스템 시작
-    server_process, bot_process = run_system()
+    server_process, wd_process = run_system()
     
     # 3. 브라우저 열기
     open_browser()
@@ -102,30 +103,15 @@ if __name__ == "__main__":
     print("💡 Press Ctrl+C in this window to STOP ALL systems safely.")
     
     try:
-        # 4. 메인 루프 (두 프로세스 모두 모니터링)
+        # 4. 메인 루프 (프로세스 모니터링)
         print("\n⏳ Monitoring processes (5s grace period)...")
-        time.sleep(5) # 윈도우 심(Shim) 프로세스 종료 대기 시간
+        time.sleep(5) 
 
         while True:
             time.sleep(5)
-            # 서버 프로세스 체크
-            if server_process.poll() is not None:
-                # 윈도우 환경에서는 프로세스가 살아있어도 poll이 리턴될 수 있으므로 한 번 더 확인
-                print("\n⚠️ Mock Server process status changed. Checking stability...")
-                time.sleep(2)
-                if server_process.poll() is not None:
-                    # 실제 종료됨
-                    # print("\n⚠️ Mock Server process ended.")
-                    # break (일단 창이 떠있으면 계속 유지하도록 처리 가능하나, 여기서는 브레이크 유지)
-                    pass 
-
-            if bot_process.poll() is not None:
-                # 엔진도 동일하게 체크
-                pass
-                
-        # [수정] 런처가 꺼져도 실제 봇 창은 살아있게 하려면 여기서 대기
-        # print("\n💡 Launcher is now in monitoring mode. Press Ctrl+C to stop all.")
-        # while True: time.sleep(100)
+            # 프로세스 생존 여부 체크 (로그만 남김)
+            if server_process.poll() is not None: pass
+            if wd_process.poll() is not None: pass
                 
     except KeyboardInterrupt:
         print("\n\n🛑 Stopping system requested by user...")
@@ -133,7 +119,7 @@ if __name__ == "__main__":
     finally:
         # 5. 종료 시 자동 청소
         print("🧹 Performing safe shutdown...")
-        for proc in [server_process, bot_process]:
+        for proc in [server_process, wd_process]:
             try:
                 if proc.poll() is None:
                     proc.terminate()

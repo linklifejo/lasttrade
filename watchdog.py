@@ -2,14 +2,20 @@ import subprocess
 import sys
 import time
 import os
+import socket
+import json
 from datetime import datetime
+
 try:
     from tel_send import tel_send
 except ImportError:
     def tel_send(msg): print(f"[No Telegram] {msg}")
 
-# 감시할 대상 스크립트
-TARGET_SCRIPT = "web_server.py"
+# 감시 설정
+TARGET_SCRIPT = "bot.py"
+UDP_IP = "127.0.0.1"
+UDP_PORT = 5005
+TIMEOUT_SEC = 60  # 60초 동안 소식 없으면 사망 판정 (기존 20초 -> 60초로 완화)
 
 def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -17,100 +23,96 @@ def log(msg):
     print(full_msg)
     return full_msg
 
-def run_zombie():
+def run_watchdog():
     python_exe = sys.executable
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), TARGET_SCRIPT)
     
-    start_msg = log(f"🔥 좀비 모드(Watchdog) 시작: {TARGET_SCRIPT} 감시 중...")
+    start_msg = log(f"🐕 [Socket Watchdog] 시작! {TARGET_SCRIPT}의 심장 박동(UDP {UDP_PORT})을 감시합니다.")
     tel_send(start_msg)
+    
+    # 1. 소켓 준비 (귀 열기)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_IP, UDP_PORT))
+    sock.settimeout(TIMEOUT_SEC) # 타임아웃 설정 (핵심)
     
     while True:
         try:
-            # 1. 프로세스 실행 (새 콘솔 창 출력)
-            log(f"프로세스 실행 중: {TARGET_SCRIPT}")
+            # 2. 프로세스 실행
+            log(f"🚀 엔진({TARGET_SCRIPT}) 시동을 겁니다...")
             process = subprocess.Popen(
                 [python_exe, script_path],
-                cwd=os.path.dirname(script_path), # CWD 명시
+                cwd=os.path.dirname(script_path),
                 creationflags=subprocess.CREATE_NEW_CONSOLE
             )
             
-            # 2. 감시 루프 (Heartbeat)
-            log("1분 주기로 생존 신고를 합니다. (눈 뜨고 감시 중 👀)")
+            # 3. 감시 루프 (Heartbeat Listening)
+            log(f"👂 엔진 소리를 듣고 있습니다... (Timeout: {TIMEOUT_SEC}초)")
+            
+            error_count = 0
+            
             while True:
-                exit_code = process.poll()
-                if exit_code is not None:
-                    # 프로세스 종료됨
-                    break
+                # 프로세스가 이미 죽었는지 체크
+                if process.poll() is not None:
+                    exit_code = process.poll()
+                    if exit_code == 0:
+                        log(f"✅ 엔진이 정상 종료되었습니다. (Code: 0)")
+                        return # 정상 종료 시 워치독도 퇴근
+                    else:
+                        log(f"⚠️ 엔진이 비정상 종료(Crash)되었습니다! (Code: {exit_code})")
+                        tel_send(f"⚠️ 봇 크래시 발생! (Code: {exit_code})")
+                        break # 재시작 루프로 이동
                 
-                # 봇은 살아있음. 1분 대기하면서 감시
-                for _ in range(60):
-                    if process.poll() is not None: break
-                    
-                    # [센스: 프리징 감지] 프로세스는 살아있는데 데이터 갱신이 멈췄는지 체크
+                try:
+                    # UDP 패킷 수신 대기 (Blocking with Timeout)
+                    data, addr = sock.recvfrom(1024)
                     try:
-                        # [DB 기반 감시로 전환] status.json 대신 DB의 system_status 테이블 확인
-                        import sqlite3
-                        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
-                        if os.path.exists(db_path):
-                            with sqlite3.connect(db_path, timeout=5) as conn:
-                                conn.row_factory = sqlite3.Row
-                                cursor = conn.execute('SELECT updated_at FROM system_status WHERE id = 1')
-                                row = cursor.fetchone()
-                                if row:
-                                    updated_at = datetime.strptime(row['updated_at'], '%Y-%m-%d %H:%M:%S')
-                                    diff = (datetime.now() - updated_at).total_seconds()
-                                    
-                                    # 장 시간(09:00~15:40)이고, 마지막 DB 갱신 후 180초(3분) 지났다면 먹통으로 간주
-                                    now_time = datetime.now().hour * 100 + datetime.now().minute
-                                    if 900 <= now_time <= 1540 and diff > 180:
-                                        log(f"🚨 [프로세스 프리징 감지] DB 상태가 {int(diff)}초 동안 갱신되지 않음!")
-                                        tel_send(f"🚨 봇이 응답하지 않아(Freezing) 강제 재시작합니다. ({int(diff)}초 미갱신)")
-                                        process.terminate()
-                                        break
-                    except Exception as e:
-                        pass
+                        hb = json.loads(data.decode())
+                        if hb.get("status") == "alive":
+                            # 생존 확인!
+                            error_count = 0
+                            # 너무 자주 로그 찍으면 시끄러우니 가끔만 출력 (옵션)
+                            # print(".", end="", flush=True) 
+                            pass
+                    except json.JSONDecodeError:
+                        pass # 깨진 패킷은 무시
+                        
+                except socket.timeout:
+                    # 타임아웃 발생! -> 심장 정지
+                    log(f"🚨 [심정지 경보] {TIMEOUT_SEC}초 동안 엔진 신호가 없습니다! Freezing 감지!")
+                    tel_send(f"🚨 봇 응답 없음(Freezing)! 강제 재시작합니다.")
                     
+                    # 강제 종료
+                    try: process.terminate()
+                    except: pass
+                    break # 재시작
+                except Exception as e:
+                    log(f"⚡ 소켓 에러: {e}")
                     time.sleep(1)
-                
-                if process.poll() is None:
-                    timestamp = datetime.now().strftime("%H:%M")
-                    print("\n" + "="*40)
-                    print(f"[{timestamp}] [WATCHDOG] 👮 이상 무! 봇이 열심히 매매 중입니다.")
-                    print("="*40 + "\n")
-
-            # 3. 종료 감지 및 분기
-            if exit_code == 0:
-                # 정상 종료 (사용자 의도 또는 정상 완료)
-                normal_msg = f"✅ 봇이 정상 종료되었습니다. (Code: {exit_code})"
-                log(normal_msg)
-                tel_send(normal_msg)
-                log("Watchdog 종료: 정상 종료 감지로 재시작하지 않습니다.")
-                break  # 루프 탈출 (재시작 안 함)
-            else:
-                # 비정상 종료 (크래시)
-                crash_msg = f"⚠️ 봇 프로세스 비정상 종료 감지! (Code: {exit_code})"
-                log(crash_msg)
-                tel_send(crash_msg)
-                tel_send("🚨 비정상 종료 발생! 로그를 확인하세요.")
-                
-                # 4. 재시작 대기
-                retry_msg = "♻️ 5초 후 봇을 재가동합니다..."
-                log(retry_msg)
-                tel_send(retry_msg)
-                time.sleep(5)
+            
+            # 4. 재시작 전 대기
+            log("♻️ 5초 후 엔진을 재가동합니다...")
+            time.sleep(5)
+            
+            # 소켓 비우기 (쌓인 구형 패킷 제거)
+            try:
+                sock.setblocking(0)
+                while True:
+                    sock.recv(1024)
+            except:
+                sock.settimeout(TIMEOUT_SEC) # 다시 타임아웃 모드로 복구
             
         except KeyboardInterrupt:
-            stop_msg = "🛑 사용자 요청으로 좀비 모드를 종료합니다."
-            log(stop_msg)
-            tel_send(stop_msg)
+            log("🛑 사용자 요청으로 감시를 종료합니다.")
             if 'process' in locals() and process:
                 process.terminate()
             break
         except Exception as e:
-            err_msg = f"☠️ Watchdog 치명적 오류: {e}"
-            log(err_msg)
-            tel_send(err_msg)
+            msg = f"☠️ Watchdog 내부 오류: {e}"
+            log(msg)
+            tel_send(msg)
             time.sleep(5)
+            
+    sock.close()
 
 if __name__ == "__main__":
-    run_zombie()
+    run_watchdog()
