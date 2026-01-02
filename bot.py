@@ -157,7 +157,9 @@ class MainApp:
 				self.today_started = True # 메시지 중복 방지용
 		
 		# 2. 장 종료 처리
-		if MarketHour.is_market_end_time() and not self.today_stopped:
+		# [Fix] Mock(가상 서버) 모드일 때는 24시간 동작하므로 장 종료 자동 정지 스킵
+		is_mock = (get_current_api_mode() == "Mock")
+		if not is_mock and MarketHour.is_market_end_time() and not self.today_stopped:
 			logger.info(f"장 종료 시간({MarketHour.MARKET_END_HOUR:02d}:{MarketHour.MARKET_END_MINUTE:02d})입니다. 자동으로 stop 명령을 실행합니다.")
 			await self.chat_command.stop(False)  # auto_start를 false로 설정하지 않음
 			logger.info("자동으로 계좌평가 보고서를 발송합니다.")

@@ -191,3 +191,85 @@
 .recent-list li:last-child {
     border-bottom: none;
 }
+/* [탭 버튼 확대] 매매 보고서 상단 탭 (전체, 매수, 매도 등) */
+.tabs {
+    margin-bottom: 30px !important;
+    gap: 20px !important;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.tab-btn {
+    font-size: 1.6rem !important;
+    padding: 12px 30px !important;
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    height: auto !important;
+}
+
+/* 매수내역 삭제, 타임컷 삭제 등 관리 버튼 확대 */
+.btn-danger-small, .btn-delete-small {
+    font-size: 1.4rem !important;
+    padding: 10px 20px !important;
+    border-radius: 8px !important;
+    height: auto !important;
+}
+
+/* 매매 보고서 테이블 셀 여백 조정 */
+#history-table td, #history-table th {
+    padding: 16px 12px !important;
+}
+
+
+/* [Global Button Scale-Up] 모든 버튼 크기 일괄 확대 */
+button, .btn, .btn-primary, .btn-secondary, .btn-danger {
+    font-size: 1.5rem !important; /* 기본 글자 더 크게 */
+    padding: 14px 28px !important;
+    border-radius: 8px !important;
+}
+
+/* 로그 비우기 등 작은 버튼도 확실히 키움 */
+.btn-small, #clear-logs {
+    font-size: 1.3rem !important;
+    padding: 10px 20px !important;
+}
+
+/* 상단 메인 네비게이션 탭 버튼 */
+.nav-links li {
+    font-size: 1.5rem !important;
+    padding: 15px 25px !important;
+}
+
+
+/* [초대형] 사이드바 시작/종료 토글 버튼 */
+#btn-bot-toggle {
+    font-size: 3.0rem !important;
+    padding: 30px 20px !important;
+    height: auto !important;
+    font-weight: 900 !important;
+    letter-spacing: 2px !important;
+    box-shadow: 0 6px 15px rgba(0,0,0,0.4) !important;
+    border-radius: 12px !important;
+}
+
+
+/* [초대형] 사이드바 메뉴 아이템 확대 */
+.nav-links li {
+    padding: 25px 30px !important;
+    margin-bottom: 20px !important;
+    border-radius: 15px !important;
+}
+
+.nav-icon {
+    font-size: 3.2rem !important;
+    margin-right: 30px !important;
+    width: 50px !important;
+    text-align: center !important;
+}
+
+.nav-text {
+    font-size: 2.2rem !important;
+    font-weight: 800 !important;
+}
+

@@ -488,10 +488,15 @@ function renderFilteredLogs(filterType) {
     console.log(`[DEBUG] Rendering ${displayLogs.length} logs for ${filterType}`);
 
     // --- 3. Render (All Centered) ---
+    // [UI 개선] 탭에 따라 구분 컬럼을 금액 컬럼으로 변경
+    let typeHeader = '구분';
+    if (filterType === 'buy') typeHeader = '매수금액';
+    else if (filterType === 'sell' || filterType === 'timecut') typeHeader = '매도금액';
+
     theadTr.innerHTML = `
         <th>시간</th>
         <th>종목명</th>
-        <th>구분</th>
+        <th>${typeHeader}</th>
         <th>수량</th>
         <th>수익률</th>
         <th>${filterType === 'timecut' ? '관리' : '사유'}</th>
@@ -507,12 +512,22 @@ function renderFilteredLogs(filterType) {
             const logName = log.name || log.stk_nm || '-';
             const uid = getUID(log);
 
+            // 금액 계산 (단가 * 수량)
+            const price = parseFloat(log.price || log.avg_price || 0);
+            const qty = parseInt(log.qty || 0);
+            const totalAmt = Math.floor(price * qty).toLocaleString() + '원';
+
             if (log.type === 'Buy') {
+                // 매수 탭이면 금액 표시, 전체 탭이면 '매수' 텍스트 표시
+                const typeCell = (filterType === 'buy')
+                    ? `<td class="text-center" style="color:#10b981; font-weight:bold;">${totalAmt}</td>`
+                    : `<td style="color:#10b981; font-weight:bold;" class="text-center">매수</td>`;
+
                 tr.innerHTML = `
                     <td class="text-center">${timePart}</td>
                     <td class="stress text-center">${logName}</td>
-                    <td style="color:#10b981; font-weight:bold;" class="text-center">매수</td>
-                    <td class="text-center">${log.qty || 0}주</td>
+                    ${typeCell}
+                    <td class="text-center">${qty}주</td>
                     <td class="text-center">-</td>
                     <td class="text-center">-</td>
                 `;
@@ -531,11 +546,16 @@ function renderFilteredLogs(filterType) {
                     </td>`;
                 }
 
+                // 매도/타임컷 탭이면 금액 표시, 전체 탭이면 '매도'/'타임컷' 텍스트 표시
+                const typeCell = (filterType === 'sell' || filterType === 'timecut')
+                    ? `<td class="text-center" style="${isTC ? 'color:orange;' : 'color:#ef4444;'} font-weight:bold;">${totalAmt}</td>`
+                    : `<td style="${isTC ? 'color:orange;' : 'color:#ef4444;'} font-weight:bold;" class="text-center">${isTC ? '타임컷' : '매도'}</td>`;
+
                 tr.innerHTML = `
                     <td class="text-center">${timePart}</td>
                     <td class="stress text-center">${logName}</td>
-                    <td style="${isTC ? 'color:orange;' : 'color:#ef4444;'} font-weight:bold;" class="text-center">${isTC ? '타임컷' : '매도'}</td>
-                    <td class="text-center">${log.qty}주</td>
+                    ${typeCell}
+                    <td class="text-center">${qty}주</td>
                     <td class="${rateClass} text-center">${rate.toFixed(2)}%</td>
                     ${lastCell}
                 `;

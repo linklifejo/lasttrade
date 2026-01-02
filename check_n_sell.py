@@ -126,7 +126,7 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				if elapsed_sec >= time_cut_limit:
 					if pl_rt < TIME_CUT_PROFIT:
 						should_sell = True
-						sell_reason = f"TimeCut({elapsed_sec/60:.0f}분)"
+						sell_reason = f"TimeCut({cur_step}차, {elapsed_sec/60:.0f}분)"
 						logger.info(f"[Time-Cut] {stock_name}: {elapsed_sec/60:.0f}분 경과, 수익률({pl_rt}%) < 기준 -> 교체 매매")
 
 			# --------------------------------------------------------------------------------
@@ -161,7 +161,7 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					
 					if drop_rate >= TS_CALLBACK and pl_rt > 0:
 						should_sell = True
-						sell_reason = "TrailingStop"
+						sell_reason = f"TrailingStop({cur_step}차)"
 						logger.info(f"[트레일링 스탑 발동] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (익절 수익률: {pl_rt}%)")
 
 			# 3. [상한가 매도]
@@ -170,16 +170,16 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			except: UPPER_LIMIT = 29.5
 			if pl_rt >= UPPER_LIMIT:
 				should_sell = True
-				sell_reason = "상한가(UpperLimit)"
+				sell_reason = f"상한가({cur_step}차)"
 				logger.info(f"[상한가 감지] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도 진행")
 
 			# 4. [일반 익절/손절]
 			if pl_rt > TP_RATE:
 				should_sell = True
-				sell_reason = "익절"
+				sell_reason = f"익절({cur_step}차)"
 			elif pl_rt < SL_RATE and single_strategy == "FIRE":
 				should_sell = True
-				sell_reason = "손절(FIRE)"
+				sell_reason = f"손절({cur_step}차)"
 
 			# --------------------------------------------------------------------------------
 			# [매도 실행]
@@ -258,12 +258,10 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				threading.Thread(target=remove_from_being_sold, daemon=True).start()
 
 				# 텔레그램 전송
-				if sell_reason in ["익절", "TrailingStop", "상한가", "상한가(UpperLimit)"]:
-					result_type = sell_reason
-				else:
-					result_type = "손절"
-				result_emoji = "🔴" if pl_rt > TP_RATE else "🔵"
-				message = f'{result_emoji} {stock["stk_nm"]} {int(stock["rmnd_qty"])}주 {result_type} 완료 (수익율: {pl_rt}%)'
+				# 텔레그램 전송
+				result_emoji = "🔴" if pl_rt > 0 else "🔵"
+				# [UI 요청] 매도(익절, 손절 등) 형식으로 상세 사유 포함
+				message = f'{result_emoji} {stock["stk_nm"]} {int(stock["rmnd_qty"])}주 매도({sell_reason}) 완료 (수익율: {pl_rt}%)'
 				tel_send(message)
 				logger.info(message)
 				

@@ -379,12 +379,12 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		
 		# [수정] 최소 매수 금액 보장 (고가 주식도 매수 가능하도록)
 		# [수정] 최소 매수 금액 보장 (설정값 연동)
-		# 사용자가 설정한 최소 주문 금액을 불러옴 (기본값: 50,000원)
-		min_buy_setting = get_setting('min_purchase_amount', 50000)
+		# 사용자가 설정한 최소 주문 금액을 불러옴 (기본값: 2,000원 - 소액 테스트용)
+		min_buy_setting = get_setting('min_purchase_amount', 2000)
 		try:
 			MIN_PURCHASE_AMOUNT = int(str(min_buy_setting).replace(',', ''))
 		except:
-			MIN_PURCHASE_AMOUNT = 50000
+			MIN_PURCHASE_AMOUNT = 2000
 			
 		if one_shot_amt < MIN_PURCHASE_AMOUNT:
 			logger.info(f"[자금 조정] 1차 매수액({one_shot_amt:,.0f}원)이 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미만 → 상향 조정")
@@ -499,9 +499,10 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		# [Log] 금액 기반 판단 근거 기록
 		logger.info(f"📊 [금액기준 판독] {stk_cd}: 현재손실 {int(current_loss_amt):,}원 (트리거:{int(unit_loss_trigger)}원) -> 목표단계:{target_step_by_amt+1}/{int(split_cnt)}")
 		
-		if one_shot_amt > 0 and one_shot_amt < 50000:
-			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원) 최소 기준 미달 → 5만원 조정")
-			one_shot_amt = 50000
+		# [수정] 소액 테스트를 위해 최소금액 하향 (50000 -> 2000)
+		if one_shot_amt > 0 and one_shot_amt < 2000:
+			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원) 최소 기준 미달 → 2000원 조정")
+			one_shot_amt = 2000
 
 		if filled_ratio >= 0.98:
 			logger.info(f"[매수 스킬] {stk_cd}: 이미 목표 비중({filled_ratio*100:.1f}%) 도달")
@@ -533,7 +534,7 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		should_buy = False
 		msg_prefix = ""
 		
-		if one_shot_amt > 10000: # 최소 1만원 이상일 때만
+		if one_shot_amt >= 2000: # 최소 2천원 이상일 때만 (소액 테스트)
 			should_buy = True
 			tag = "물타기" if evlu_pnl < 0 else "불타기"
 			msg_prefix = f"{tag}(목표단계:{target_step_by_amt+1})"
@@ -574,8 +575,8 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		logger.warning(f"목표 매수액({expense:,.0f}원) > 주문가능현금({balance:,.0f}원) -> 현금 전액 사용")
 		expense = balance
 	
-	# 최종 점검: 너무 소액인 경우 매수 스킵 (예: 1만원 미만)
-	if expense < 10000:
+	# 최종 점검: 너무 소액인 경우 매수 스킵 (예: 2000원 미만)
+	if expense < 2000:
          # 단, 잔고가 거의 0에 수렴하는 경우는 위에서 걸러졌을 것이고, 
          # 여기서 걸리는 건 배정 한도가 꽉 찼거나 하는 경우임.
 		logger.warning(f"[매수 스킵] 최종 매출액({expense:,.0f}원)이 너무 적습니다.")
