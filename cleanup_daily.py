@@ -9,9 +9,14 @@ import os
 from datetime import datetime, timedelta
 from logger import logger
 
+from db_backup import backup_database
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trading.db')
 
 def cleanup_daily_data():
+    """전일 데이터 정리 시작 전 백업을 먼저 수행합니다."""
+    logger.info("💾 데이터 정리 전 자동 백업을 시작합니다.")
+    backup_database()
+    
     """전일 데이터 삭제 (당일만 유지)"""
     try:
         conn = sqlite3.connect(DB_FILE)

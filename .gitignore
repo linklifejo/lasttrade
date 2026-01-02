@@ -38,6 +38,7 @@ pylatexenc/
 *.db-wal
 # Specific for this project
 trading.db
+backups/
 
 # Logs
 logs/
