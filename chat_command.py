@@ -571,6 +571,7 @@ class ChatCommand:
 			• limit {숫자} - 일일 손실 한도 설정 (예: limit -3)
 			• cnt {숫자} - 목표 종목 수 설정 (예: cnt 5)
 			• cap {숫자} - 투자 비중 설정 (예: cap 70)
+			• ssr {숫자} - 추가매수 간격 설정 (예: ssr 4)
 			• tpr {숫자} - 익절 기준 설정 (예: tpr 5)
 			• slr {숫자} - 손절 기준 설정 (양수 입력 시 음수로 변환)
 			• mwp {0.0~1.0} - 수학 엔진 최소 승률 (예: mwp 0.6)
@@ -1093,6 +1094,13 @@ class ChatCommand:
 				return await self._handle_set_command('math_min_sample_count', parts[1])
 			else:
 				tel_send("❌ 사용법: msc {숫자} (예: msc 10)")
+				return False
+		elif command.startswith('ssr '):
+			parts = command.split()
+			if len(parts) == 2:
+				return await self._handle_set_command('single_stock_rate', parts[1])
+			else:
+				tel_send("❌ 사용법: ssr {숫자} (예: ssr 4)")
 				return False
 		elif command == 'factor' or command == 'f':
 			return await self.factor()

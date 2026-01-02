@@ -266,7 +266,7 @@ class SettingsFrame(ttk.Frame):
 
         add_field("single_stock_rate", "추가 매수 간격 (%) (Interval)", 
                  "몇 % 움직일 때마다 추가로 살까요?", "float", 
-                 ["1.0", "2.0", "3.0", "4.0", "5.0", "10.0"])
+                 ["1.0", "2.0", "3.0", "4.0", "5.0", "6.0", "7.0", "8.0", "9.0", "10.0"])
 
         add_field("initial_buy_ratio", "초기 매수 비율 (%) (Initial Buy)", 
                  "첫 매수 시 종목당 할당 금액의 몇 %를 사용할까요?\n불타기: 10% 추천 / 물타기: 10% 추천", "float", 

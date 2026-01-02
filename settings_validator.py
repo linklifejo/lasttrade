@@ -76,7 +76,7 @@ class SettingsValidator:
 			'type': (int, float),
 			'min': 0.1,
 			'max': 20.0,
-			'description': '전략 기준 수익률 (%)'
+			'description': '추가 매수 간격 (%)'
 		},
 		'take_profit_rate': {
 			'type': (int, float),
