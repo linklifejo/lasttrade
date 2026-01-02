@@ -20,13 +20,63 @@ class SettingsValidator:
 		'target_stock_count': {
 			'type': (int, float),
 			'min': 1,
-			'max': 50,
+			'max': 100,
 			'description': '목표 보유 종목 수'
 		},
-		'initial_asset': {
+		'target_profit_amt': {
 			'type': int,
-			'min': 1000000,
-			'description': '초기 투자 자산 (원)'
+			'min': 1000,
+			'description': '일일 목표 수익금 (원)'
+		},
+		'global_loss_rate': {
+			'type': (int, float),
+			'min': -100.0,
+			'max': -0.1,
+			'description': '일일 전체 손실 제한 (%)'
+		},
+		'trading_capital_ratio': {
+			'type': (int, float),
+			'min': 1,
+			'max': 100,
+			'description': '투자 비중 (순자산 대비 %)'
+		},
+		'split_buy_cnt': {
+			'type': int,
+			'min': 1,
+			'max': 10,
+			'description': '분할 매수 횟수 (1~10)'
+		},
+		'use_rsi_filter': {
+			'type': bool,
+			'description': 'RSI 필터 사용 여부'
+		},
+		'rsi_limit': {
+			'type': (int, float),
+			'min': 1,
+			'max': 100,
+			'description': 'RSI 매수 제한 상한값'
+		},
+		'math_min_win_rate': {
+			'type': (int, float),
+			'min': 0,
+			'max': 1.0,
+			'description': '수학 엔진 최소 승률 (0.0~1.0)'
+		},
+		'math_min_sample_count': {
+			'type': int,
+			'min': 0,
+			'max': 1000,
+			'description': '수학 엔진 최소 표본 수'
+		},
+		'single_stock_strategy': {
+			'type': str,
+			'description': '매매 전략 (FIRE/WATER)'
+		},
+		'single_stock_rate': {
+			'type': (int, float),
+			'min': 0.1,
+			'max': 20.0,
+			'description': '전략 기준 수익률 (%)'
 		},
 		'take_profit_rate': {
 			'type': (int, float),

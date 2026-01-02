@@ -569,32 +569,51 @@ class ChatCommand:
 			[설정 명령어]
 			• goal {금액} - 목표 수익금 설정 (예: goal 700000)
 			• limit {숫자} - 일일 손실 한도 설정 (예: limit -3)
-			• auto {on/off} - 자동 시작 여부 설정 (예: auto on)
+			• cnt {숫자} - 목표 종목 수 설정 (예: cnt 5)
+			• cap {숫자} - 투자 비중 설정 (예: cap 70)
 			• tpr {숫자} - 익절 기준 설정 (예: tpr 5)
 			• slr {숫자} - 손절 기준 설정 (양수 입력 시 음수로 변환)
-			• brt {숫자} - 매수 비용 비율 설정 (예: brt 3)
+			• mwp {0.0~1.0} - 수학 엔진 최소 승률 (예: mwp 0.6)
+			• msc {숫자} - 수학 엔진 최소 표본 (예: msc 10)
+			
+			• factor (또는 f) - 현재 주요 팩터 설정값 조회
+			• /set {키} {값} - 상세 설정 변경
+			
 			• status - 매수 금지 종목 상태 확인
 			• reset - 매수 금지 목록 초기화
 			• sellall (또는 sa) - 보유 전 종목 일괄 매도
-
-			[사용 예시]
-			• goal 1000000 (목표 수익 100만원)
-			• limit -5 (손실 한도 -5%)
-			• auto on (매일 자동 시작)
-			• tpr 5 (수익률 5%에서 매도)
-			• condition 0 (0번 조건식으로 변경)
-
-			[도움말]
-			• help - 이 도움말 표시
-			• analyze (또는 분석) - 수학적 기대치 및 최적 RSI 분석
-
-			모든 명령어는 퍼센트 단위로 입력하세요."""
+			
+			 모든 설정은 즉시 반영됩니다. 자세한 키 목록은 factor 명령어로 확인하세요."""
 			
 			tel_send(help_message)
 			return True
 			
 		except Exception as e:
 			tel_send(f"❌ help 명령어 실행 중 오류: {e}")
+			return False
+
+	async def factor(self):
+		"""현재 주요 팩터 설정값을 조회합니다."""
+		try:
+			from settings_validator import SettingsValidator
+			keys = [
+				'target_stock_count', 'trading_capital_ratio', 'split_buy_cnt',
+				'take_profit_rate', 'stop_loss_rate', 'target_profit_amt', 
+				'global_loss_rate', 'math_min_win_rate', 'math_min_sample_count',
+				'use_rsi_filter', 'rsi_limit'
+			]
+			
+			msg = "⚙️ [현재 주요 팩터 설정]\n\n"
+			for key in keys:
+				val = get_setting(key, "N/A")
+				desc = SettingsValidator.VALIDATION_RULES.get(key, {}).get('description', key)
+				msg += f"• {desc} ({key}): {val}\n"
+			
+			msg += "\n💡 변경법: /set {키} {값}\n예: /set math_min_win_rate 0.6"
+			tel_send(msg)
+			return True
+		except Exception as e:
+			tel_send(f"❌ factor 조회 오류: {e}")
 			return False
 
 	async def status(self):
@@ -1047,6 +1066,36 @@ class ChatCommand:
 			else:
 				tel_send("❌ 사용법: brt {숫자} (예: brt 3)")
 				return False
+		elif command.startswith('cnt '):
+			parts = command.split()
+			if len(parts) == 2:
+				return await self._handle_set_command('target_stock_count', parts[1])
+			else:
+				tel_send("❌ 사용법: cnt {숫자} (예: cnt 5)")
+				return False
+		elif command.startswith('cap '):
+			parts = command.split()
+			if len(parts) == 2:
+				return await self._handle_set_command('trading_capital_ratio', parts[1])
+			else:
+				tel_send("❌ 사용법: cap {비율} (예: cap 70)")
+				return False
+		elif command.startswith('mwp '):
+			parts = command.split()
+			if len(parts) == 2:
+				return await self._handle_set_command('math_min_win_rate', parts[1])
+			else:
+				tel_send("❌ 사용법: mwp {0.0~1.0} (예: mwp 0.6)")
+				return False
+		elif command.startswith('msc '):
+			parts = command.split()
+			if len(parts) == 2:
+				return await self._handle_set_command('math_min_sample_count', parts[1])
+			else:
+				tel_send("❌ 사용법: msc {숫자} (예: msc 10)")
+				return False
+		elif command == 'factor' or command == 'f':
+			return await self.factor()
 		elif command == 'analyze' or command == '분석':
 			return await self.analyze()
 		else:
