@@ -36,6 +36,7 @@ class MainApp:
 		self.keep_running = True
 		self.today_started = False  # 오늘 start가 실행되었는지 추적
 		self.today_stopped = False  # 오늘 stop이 실행되었는지 추적
+		self.today_learned = False  # [NEW] 오늘 AI 학습이 완료되었는지 추적
 		self.last_check_date = None  # 마지막으로 확인한 날짜
 		self.last_valid_total_asset = 0 # [안전장치] 마지막으로 확인된 정상 자산 금액
 		self.held_since = {} # [Time-Cut] 종목별 최초 보유 시각 추적 {code: timestamp}
@@ -141,6 +142,7 @@ class MainApp:
 		if self.last_check_date != today:
 			self.today_started = False
 			self.today_stopped = False
+			self.today_learned = False # [NEW] 학습 플래그 리셋
 			self.last_check_date = today
 			
 			# [NEW] 새로운 날 시작 시 전일 데이터 정리
@@ -183,7 +185,7 @@ class MainApp:
 				logger.info(f"자동 시작 대기 중 - 장 시작 시 자동으로 연결됩니다.")
 				self.today_started = True # 메시지 중복 방지용
 		
-		# 2. 장 종료 처리
+		# 2. 장 종료 처리 (매도 및 정지)
 		# [Fix] Mock(가상 서버) 모드일 때는 24시간 동작하므로 장 종료 자동 정지 스킵
 		is_mock = (get_current_api_mode() == "Mock")
 		if not is_mock and MarketHour.is_market_end_time() and not self.today_stopped:
@@ -191,12 +193,15 @@ class MainApp:
 			await self.chat_command.stop(False)  # auto_start를 false로 설정하지 않음
 			logger.info("자동으로 계좌평가 보고서를 발송합니다.")
 			await self.chat_command.report()  # 장 종료 시 report도 자동 발송
-			
-			# [NEW] 장 종료 후 AI 학습 실행
-			logger.info("🤖 AI 학습 시작 (당일 데이터)")
+			self.today_stopped = True  # 오늘 stop 실행 완료 표시
+
+		# 3. [NEW] AI 학습 통합 처리 (Mock 포함 모든 모드 15:40에 실행)
+		if MarketHour.is_market_end_time() and not self.today_learned:
+			logger.info("🤖 AI 학습 시작 (자동 스케줄링)")
 			try:
 				import subprocess
 				import sys
+				# 봇이 돌고 있는 상태에서 백그라운드로 학습 실행
 				result = subprocess.run(
 					[sys.executable, 'learn_daily.py'],
 					cwd=os.path.dirname(os.path.abspath(__file__)),
@@ -213,7 +218,7 @@ class MainApp:
 			except Exception as e:
 				logger.error(f"⚠️ AI 학습 오류: {e}")
 			
-			self.today_stopped = True  # 오늘 stop 실행 완료 표시
+			self.today_learned = True # 오늘 학습 완료 표시
 
 	async def check_web_command(self):
 		"""웹 대시보드에서 보낸 명령을 확인하고 처리합니다. (DB 기반)"""
