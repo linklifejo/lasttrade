@@ -51,7 +51,8 @@ body {
 
 /* Sidebar */
 .sidebar {
-    width: 280px;
+    width: 450px;
+    /* 280px -> 450px Massive width */
     background: var(--sidebar-bg);
     border-right: 1px solid var(--border-color);
     display: flex;
@@ -111,10 +112,13 @@ body {
 
 .btn-toggle {
     width: 100%;
-    padding: 18px 20px;
-    font-size: 1.4rem;
-    font-weight: 700;
-    border-radius: 10px;
+    padding: 24px 30px;
+    /* Padding increased */
+    font-size: 2.2rem;
+    /* 1.4rem -> 2.2rem Massive */
+    font-weight: 800;
+    /* Bolder */
+    border-radius: 14px;
     border: none;
     cursor: pointer;
     display: flex;
@@ -203,12 +207,14 @@ body {
 }
 
 .nav-icon {
-    font-size: 1.5rem;
+    font-size: 2.2rem;
+    /* 1.5rem -> 2.2rem */
 }
 
 .nav-text {
-    font-size: 1.2rem;
-    font-weight: 600;
+    font-size: 1.8rem;
+    /* 1.2rem -> 1.8rem */
+    font-weight: 700;
 }
 
 .sidebar-footer {

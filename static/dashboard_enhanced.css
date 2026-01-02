@@ -7,6 +7,23 @@
     font-weight: 800;
 }
 
+/* Main Grid - Left side (Chart/Holdings) much wider */
+.main-grid {
+    display: grid;
+    grid-template-columns: 2.5fr 1fr;
+    /* 1.5fr -> 2.5fr */
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+/* Bottom Grid - Left side (Holdings Table) wider */
+.bottom-grid {
+    display: grid;
+    grid-template-columns: 2.5fr 1fr;
+    /* 1fr 1fr -> 2.5fr 1fr */
+    gap: 20px;
+}
+
 /* Summary Cards - One Row */
 .summary-section {
     display: grid;
