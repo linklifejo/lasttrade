@@ -351,7 +351,7 @@ class RealKiwoomAPI(KiwoomAPI):
             'authorization': f'Bearer {token}',
             'cont-yn': 'N',
             'next-key': '',
-            'api-id': 'kt10000',
+            'api-id': 'kt10001',
         }
         
         params = {
