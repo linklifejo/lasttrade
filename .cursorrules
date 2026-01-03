@@ -1,16 +1,15 @@
-# Project Rules: lasttrade
+# Project Rules: LASTTRADE
 
-1. **Language**: Always communicate in Korean (한글로 대화).
-2. **Precision**: 수정을 아주 세심하게 요구내용만 한다. 논리적 비약이 있거나 불확실하면 반드시 질문한다. (Perform modifications very meticulously and only on the requested content. If there's a logical leap or uncertainty, always ask questions.)
-3. **Identity & Library Integrity**:
-    - 본 시스템은 대외적으로 '키움 REST API'라는 명칭을 사용하나, 기술적으로는 한국투자증권(KIS)의 REST API 구조를 따르고 있다. 코드 내에서 이를 '수정'하려 들지 말고, 기존의 명칭 체계를 그대로 유지한다.
-    - **[CRITICAL] 절대 금지: `kiwoom/` 디렉토리 내의 API 라이브러리 파일들(`real_api.py` 등)은 절대로 수정하지 않는다.** API 통신 방식이나 ID 값(예: `kt10000`)을 임의로 변경하면 시스템 전체에 치명적인 오류를 초래할 수 있다. 버그가 의심되면 반드시 사용자에게 먼저 보고한다.
-4. **Trading Strategy Continuity**:
-    - **1:1:2:2:4:4... 수열**: 분할 매수 가중치 수열은 시스템의 핵심 자금 관리 원칙이다. 이를 임의로 수정하거나 단순화하지 않는다.
-    - **WATER/FIRE 전략**: `check_n_buy.py` 및 `check_n_sell.py`에 구현된 물타기(WATER)/불타기(FIRE) 로직의 핵심 파라미터는 `trading_rules.md`를 기준으로 하며, 로직 수정 시 이 문서의 원칙과 일치하는지 확인한다.
-5. **Mathematical Engine Safety**: `math_analyzer.py`나 `technical_judge.py` 등 수학적/기술적 분석 엔진을 수정할 때는 기존의 확률론적 접근 방식을 존중하며, 파라미터 최적화 시 `/math-analysis` 워크플로우를 참고한다.
-6. **Onboarding & Rules**: 새로운 대화나 모델 변경 시, `trading_rules.md`를 최우선으로 읽고 시스템의 매매 원칙을 숙지한다. 함부로 파일을 삭제하거나 기본 설계를 변경하지 않는다.
-7. **Git Management**: 사용자가 "처리해라", "커밋해라", "완료" 등의 명시적인 요청을 할 때만 변경 사항을 Git에 반영(add, commit)한다.
-8. **Approval**: 수정을 진행하기 전에는 반드시 "수정할까요?"라고 질문하여 사용자의 명확한 승인을 얻는다. 독단적인 매매 로직 수정은 엄격히 금지된다.
-15. **Dashboard & Web**: `web_server.py` 및 `static/` 내의 프론트엔드 코드 수정 시, 실시간 데이터 정합성과 사용자 경험(UX)을 최우선으로 고려하며, `watchdog.py`와의 연동성을 깨뜨리지 않도록 주의한다.
-16. **Heartbeat System Protection**: `bot.py`와 `watchdog.py` 사이의 UDP 5005 포트 통신은 시스템 사활이 걸린 감시 장치이다. 메인 루프 내의 `_send_heartbeat()` 호출을 제거하거나 통신 포트를 변경할 경우 시스템이 무한 재시작 루프에 빠질 수 있으므로 절대 임의로 제거하지 않는다.
+1. **Brand Identity**: 본 시스템의 공식 명칭은 **LASTTRADE**이다. 모든 로그, 알림, 문서에서 이 명칭을 사용한다.
+2. **Master Principles**: 모든 개발 및 로직 수정은 **`LASTTRADE_DEV_PRINCIPLES.md`**에 명시된 '시스템 개발 대원칙'을 최우선으로 준수한다. 이 문서와 충돌하는 제안이나 코딩은 절대 금지된다.
+3. **Language**: Always communicate in Korean (한글로 대화).
+4. **Precision**: 수정을 아주 세심하게 요구내용만 한다. 논리적 비약이 있거나 불확실하면 반드시 질문한다.
+5. **Identity & Library Integrity**:
+    - 본 시스템은 대외적으로 '키움 REST API'라는 명칭을 사용하나, 기술적으로는 한국투자증권(KIS)의 REST API 구조를 따르고 있다.
+    - **[CRITICAL] 절대 금지: `kiwoom/` 디렉토리 내의 API 라이브러리 파일들(`real_api.py` 등)은 절대로 수정하지 않는다.**
+6. **Trading Strategy Continuity**:
+    - **1:1:2:2:4 수열**: 추가매수 가중치 수열(1:1:2:2:4...)은 시스템의 핵심 자금 관리 원칙이다.
+    - **WATER 전략**: 추가매수의 기본은 물타기(WATER)이며, 매입 완료(MAX) 단계 후의 리스크 관리(손절) 원칙을 철저히 준수한다.
+7. **Mathematical Engine**: `math_analyzer.py`와 `learn_daily.py`는 `LASTTRADE_DEV_PRINCIPLES.md`에 정의된 팩터(수익률, 단계, 자금 비중 등)를 기반으로 학습하고 분석해야 한다. RSI 등 제외된 팩터는 학습 가중치를 낮추거나 제외한다.
+8. **Git & Approval**: 사용자가 "처리해라", "커밋해라", "완료" 등의 명시적인 요청을 할 때만 Git에 반영하며, 수정 전 "수정할까요?"라고 질문하여 승인을 얻는다.
+9. **System Protection**: UDP 5005 포트 하트비트 시스템과 `watchdog.py`의 연동성을 절대 깨뜨리지 않는다.

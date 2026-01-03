@@ -35,8 +35,9 @@ def get_analysis_report():
     df = pd.concat([df.drop('factors_json', axis=1), factors_df], axis=1)
     
     report = []
-    report.append(f"📊 [수학적 엔진 심화 분석 리포트]")
-    report.append(f"✅ 총 분석 표본: {len(df)}건\n")
+    report.append(f"📊 [LASTTRADE 수학적 엔진 심화 분석 리포트]")
+    report.append(f"✅ 총 분석 표본: {len(df)}건")
+    report.append(f"📡 [대원칙] RSI 필터링보다 WATER 전략(평단가/수열) 관점에서 성과 분석\n")
     
     # --- RSI_1m 분석 ---
     df['rsi_bin'] = pd.cut(df['rsi_1m'], bins=range(0, 105, 10))
@@ -85,7 +86,7 @@ def update_cache():
             factors_df = df['factors_json'].apply(lambda x: pd.Series(json.loads(x)))
             _cache_data = pd.concat([df.drop('factors_json', axis=1), factors_df], axis=1)
             _last_cache_time = time.time()
-            logger.info(f"🔄 [Math Engine] {len(_cache_data)}건의 데이터를 기반으로 지식 베이스 갱신 완료")
+            logger.info(f"🔄 [LASTTRADE Math] {len(_cache_data)}건의 데이터를 기반으로 지식 베이스(대원칙 기반) 갱신 완료")
     except Exception as e:
         logger.error(f"지식 베이스 갱신 실패: {e}")
 

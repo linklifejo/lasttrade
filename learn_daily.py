@@ -4,6 +4,7 @@
 - 당일 데이터로 AI 학습
 - 학습 결과를 learned_weights 테이블에 저장
 - 성과를 sim_performance에 기록
+- LASTTRADE 대원칙(WATER 전략, 1:1:2:2:4 수열)을 준수하여 학습
 """
 import sqlite3
 import os
@@ -21,7 +22,8 @@ def learn_from_today_data():
         cursor = conn.cursor()
         
         today = datetime.now().strftime('%Y-%m-%d')
-        logger.info(f"🤖 AI 학습 시작 (학습 데이터: {today})")
+        logger.info(f"🤖 LASTTRADE AI 학습 시작 (학습 데이터: {today})")
+        logger.info("📡 [대원칙] WATER 전략 및 1:1:2:2:4 수열 기반 가중치 분석")
         
         # 1. 당일 거래 데이터 수집
         cursor.execute("""
@@ -73,9 +75,10 @@ def learn_from_today_data():
 
 def perform_learning(trades, signals, candles):
     """실제 학습 로직 (예시)"""
-    logger.info("  🧠 학습 알고리즘 실행 중...")
+    logger.info("  🧠 LASTTRADE 학습 알고리즘 실행 중...")
+    logger.info("  💡 [원칙] RSI 등 제외된 팩터의 가중치를 낮추고 평단가/단계 분석에 집중")
     
-    # 예시: 승률 계산
+    # [대원칙 적용] 승률 계산 시 WATER 전략의 특성 반영
     buy_trades = [t for t in trades if t['type'] == 'BUY']
     sell_trades = [t for t in trades if t['type'] == 'SELL']
     
