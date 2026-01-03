@@ -210,9 +210,10 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	
 	if split_cnt_setting < 1: split_cnt_setting = 1
 	
-	# [RSI 필터] 과매수(70 이상) 구간 매수 금지
+	# [대원칙] RSI는 적용하지 않는다 (나중에 적용 가능하도록 로직은 유지하되, 기본 OFF 권장)
 	use_rsi = get_setting('use_rsi_filter', False)
 	if use_rsi:
+		logger.info("📡 [LASTTRADE RSI] 필터링 활성화 상태 (대원칙에 따라 사용 시 주의)")
 		# [Danta] 1분봉 및 3분봉 RSI 동시 체크
 		rsi_1m = get_rsi_for_timeframe(stk_cd, '1m')
 		rsi_3m = get_rsi_for_timeframe(stk_cd, '3m')
@@ -247,7 +248,7 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	# [Fix] rsi_1m 또는 win_prob가 None인 경우를 위한 안전한 포맷팅
 	rsi_fmt = f"{rsi_1m:.2f}" if rsi_1m is not None else "N/A"
 	prob_fmt = f"{win_prob*100:.1f}" if win_prob is not None else "N/A"
-	logger.info(f"📊 [Math Filter] RSI_1m: {rsi_fmt} -> 기대 승률: {prob_fmt}% (표본: {sample_count}건)")
+	logger.info(f"📊 [LASTTRADE Math] RSI_1m: {rsi_fmt} -> 기대 승률: {prob_fmt}% (표본: {sample_count}건)")
 	
 	# 데이터가 충분할 때만 승률 필터 적용
 	math_weight = 1.0
@@ -320,7 +321,7 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	split_cnt_int = int(split_cnt)
 	weights = []
 	for i in range(split_cnt_int):
-		# 2단계마다 2배씩 증가하는 사용자 수열 (1, 1, 2, 2, 4, 4...)
+		# [대원칙 준수] 2단계마다 2배씩 증가하는 사용자 수열 (1, 1, 2, 2, 4, 4...)
 		weight = 2**(i // 2)
 		weights.append(weight)
 			

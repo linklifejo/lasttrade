@@ -130,24 +130,10 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						logger.info(f"[Time-Cut] {stock_name}: {elapsed_sec/60:.0f}분 경과, 수익률({pl_rt}%) < 기준 -> 교체 매매")
 
 			# --------------------------------------------------------------------------------
-			# [매도 판단 핵심 로직]
+			# [매도 판단 핵심 로직 - LASTTRADE 대원칙 준수]
 			# --------------------------------------------------------------------------------
 
-			# 1. [MAX 손절] WATER 전략 필살기: 매집 완료 후 손실 시 즉시 매도
-			if not should_sell and single_strategy == "WATER":
-				# [단순화] 1회 설정이면 무조건 MAX로 간주
-				if split_buy_cnt <= 1:
-					is_max_bought = True
-				else:
-					is_max_bought = (cur_step >= split_buy_cnt) or (pchs_amt >= alloc_per_stock * 0.95)
-				
-				# 손실 발생 시 (-0.01% 미만)
-				if is_max_bought and pl_rt < -0.01:
-					should_sell = True
-					sell_reason = f"MAX손절({cur_step}차)"
-					logger.warning(f"🚨 [MAX 손절] {stock_name}: {cur_step}/{split_buy_cnt}차 매수 완료 후 손실({pl_rt}%) -> 즉시 매도")
-
-			# 2. [트레일링 스탑]
+			# 1. [트레일링 스탑] (대원칙: TS는 우선적으로 발동한다)
 			if USE_TRAILING:
 				if pl_rt >= TS_ACTIVATION:
 					cur_prc = float(stock.get('cur_prc', 0))
@@ -162,24 +148,52 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					if drop_rate >= TS_CALLBACK and pl_rt > 0:
 						should_sell = True
 						sell_reason = f"TrailingStop({cur_step}차)"
-						logger.info(f"[트레일링 스탑 발동] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (익절 수익률: {pl_rt}%)")
+						logger.info(f"🛡️ [LASTTRADE TS] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (익절 수익률: {pl_rt}%)")
+
+			# 2. [물타기(WATER) 전략 특수 손절 로직]
+			# 대원칙: 물타기 완료 후에는 추가 하락 시 즉시 매도하여 리스크 확정
+			if not should_sell and single_strategy == "WATER":
+				# [MAX 도달 판정] 
+				if split_buy_cnt <= 1:
+					is_max_bought = True
+				else:
+					# 실제 투입 금액이 할당액의 95% 이상이면 MAX로 간주
+					is_max_bought = (cur_step >= split_buy_cnt) or (pchs_amt >= alloc_per_stock * 0.95)
+				
+				# [대원칙 예시 반영] 손절률이 1%일 때, 물타기 완료 후 -3% 도달 시 매도
+				# 즉, SL_RATE보다 2% 더 하락한 지점을 임계치로 설정 (안전 마진)
+				max_sl_trigger = SL_RATE - 2.0 
+				if is_max_bought and pl_rt <= max_sl_trigger:
+					should_sell = True
+					sell_reason = f"WATER완성손절({cur_step}차)"
+					logger.warning(f"🚨 [LASTTRADE WATER MAX] {stock_name}: 물타기 완료 후 추가 하락({pl_rt}% <= {max_sl_trigger}%) -> 즉시 매도")
+				
+				# 추가적으로, 물타기 완료 후 수익권에서 다시 손실로 전환되는 경우도 방어 (0% 하향 돌파 시)
+				# (사용자 원칙의 '즉시 매도' 뉘앙스 반영)
+				elif is_max_bought and pl_rt < -0.5 and SL_RATE > -1.0: # 타이트한 손절 설정 시
+				    should_sell = True
+				    sell_reason = f"MAX손실확정({cur_step}차)"
 
 			# 3. [상한가 매도]
-			ul_val = cached_setting('upper_limit_rate', 29.5)
-			try: UPPER_LIMIT = float(ul_val)
-			except: UPPER_LIMIT = 29.5
-			if pl_rt >= UPPER_LIMIT:
-				should_sell = True
-				sell_reason = f"상한가({cur_step}차)"
-				logger.info(f"[상한가 감지] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도 진행")
+			if not should_sell:
+				ul_val = cached_setting('upper_limit_rate', 29.5)
+				try: UPPER_LIMIT = float(ul_val)
+				except: UPPER_LIMIT = 29.5
+				if pl_rt >= UPPER_LIMIT:
+					should_sell = True
+					sell_reason = f"상한가({cur_step}차)"
+					logger.info(f"🚀 [LASTTRADE 상한가] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도")
 
 			# 4. [일반 익절/손절]
-			if pl_rt > TP_RATE:
-				should_sell = True
-				sell_reason = f"익절({cur_step}차)"
-			elif pl_rt < SL_RATE and single_strategy == "FIRE":
-				should_sell = True
-				sell_reason = f"손절({cur_step}차)"
+			if not should_sell:
+				if pl_rt >= TP_RATE:
+					should_sell = True
+					sell_reason = f"익절({cur_step}차)"
+				elif pl_rt <= SL_RATE:
+					# WATER 전략은 위에서 MAX 단계별로 별도 처리했으므로, 여기서는 FIRE 또는 일반적인 경우 처리
+					if single_strategy == "FIRE" or is_max_bought:
+						should_sell = True
+						sell_reason = f"손절({cur_step}차)"
 
 			# --------------------------------------------------------------------------------
 			# [매도 실행]
@@ -260,8 +274,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				# 텔레그램 전송
 				# 텔레그램 전송
 				result_emoji = "🔴" if pl_rt > 0 else "🔵"
-				# [UI 요청] 매도(익절, 손절 등) 형식으로 상세 사유 포함
-				message = f'{result_emoji} {stock["stk_nm"]} {int(stock["rmnd_qty"])}주 매도({sell_reason}) 완료 (수익율: {pl_rt}%)'
+				# [LASTTRADE] 시스템 명칭 포함 및 포맷 통일
+				message = f'[{mode}] {result_emoji} LASTTRADE 매도 완료: {stock["stk_nm"]} {int(stock["rmnd_qty"])}주 ({sell_reason}) [수익률: {pl_rt}%]'
 				tel_send(message)
 				logger.info(message)
 				

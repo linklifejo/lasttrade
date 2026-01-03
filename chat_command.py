@@ -947,23 +947,16 @@ class ChatCommand:
 					global_loss_limit = -999.0
 
 				if profit_rate <= global_loss_limit:
-					logger.warning(f"📉 일일 손실 한도 초과 감지! ({profit_rate:.2f}% <= {global_loss_limit}%)")
-					try:
-						self.initial_asset = current_asset
-						today_str = datetime.datetime.now().strftime('%Y-%m-%d')
-						with open(self.daily_asset_path, 'w', encoding='utf-8') as f:
-							json.dump({'date': today_str, 'asset': current_asset}, f)
-						tel_send(f"🔄 손실 한도 도달로 기준 자산을 {current_asset:,.0f}원으로 자동 보정했습니다. 매매를 계속합니다.")
-						return
-					except: pass
+					logger.warning(f"📉 [LASTTRADE] 일일 손실 한도 초과 감지! ({profit_rate:.2f}% <= {global_loss_limit}%)")
+					tel_send(f"📉 [LASTTRADE] 일일 손실 한도({global_loss_limit}%)에 도달하여 전량 매도 및 종료합니다.")
 					await self.sellall()
 					return
 
 				# 3-2. 목표 수익 달성
-				target_profit = int(get_setting('target_profit_amt', 500000))
-				if profit_amt >= target_profit and profit_rate < 10.0: # 비정상 수익(API 지연) 체크 포함
-					logger.warning(f"🎉 일일 목표 수익 달성! ({profit_amt:,.0f}원)")
-					tel_send(f"🎉 일일 목표 수익({target_profit:,.0f}원)을 달성하여({profit_amt:,.0f}원) 익절 종료합니다! 💰")
+				target_profit = int(get_setting('target_profit_amt', 0))
+				if target_profit > 0 and profit_amt >= target_profit:
+					logger.warning(f"🎉 [LASTTRADE] 일일 목표 수익 달성! ({profit_amt:,.0f}원)")
+					tel_send(f"🎉 [LASTTRADE] 일일 목표 수익({target_profit:,.0f}원)을 달성하여 전량 매도 및 종료합니다! 💰")
 					await self.sellall()
 					return
 					
