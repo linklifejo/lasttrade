@@ -478,6 +478,28 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		
 		# 손실액 비례 목표 단계
 		target_step_by_amt = int(current_loss_amt / unit_loss_trigger) if unit_loss_trigger > 0 else 0
+
+		# [FIRE 전략 보강] 수익 발생 시 불타기 단계 계산
+		if single_strategy == 'FIRE' and pl_rt > 0:
+			# FIRE 전략은 '추가매수간격(예: 4%)' 상승 시마다 불타기 수행
+			# 예: 4% 상승 -> 2단계 진입, 8% 상승 -> 3단계 진입
+			fire_interval = float(get_setting('additional_buy_interval', 4.0)) # 기본 4%
+			if fire_interval <= 0: fire_interval = 4.0
+			
+			# 현재 수익률이 간격의 몇 배인지 계산 (예: 4.5% / 4% = 1.1 -> 1단계 추가)
+			# 1차 매수(기본) 상태에서 +4%가 되면 2차 매수(1단계 추가)를 해야 함
+			additional_step = int(pl_rt / fire_interval)
+			
+			# 불타기 목표 단계 = 현재 1차(0) + 추가 단계
+			# 예: 4% 상승 시 -> 1단계 추가 -> 목표 2차(index 1)
+			# 예: 8% 상승 시 -> 2단계 추가 -> 목표 3차(index 2)
+			target_step_fire = additional_step
+			
+			# 손실 기반 단계(target_step_by_amt) 대신 수익 기반 단계 사용
+			# 단, 현재 실제 단계보다 높을 때만 의미 있음
+			target_step_by_amt = target_step_fire
+			logger.info(f"🔥 [FIRE 분석] 수익률 {pl_rt}% (간격 {fire_interval}%) -> 불타기 목표: {target_step_by_amt+1}차")
+
 		if target_step_by_amt >= split_cnt: target_step_by_amt = split_cnt - 1
 		
 		# 3. 추가 매수 결정
@@ -516,7 +538,7 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 			return False
 
 		# [안전장치] 현재 매도 조건(익절/손절/트레일링)을 만족하는지 확인
-		# 만약 지금 팔아야 하는 종목이라면, 아무리 물타기 조건이라도 사면 안 됨
+		# 만약 지금 팔아야 하는 종목이라면, 아무리 물타기/불타기 조건이라도 사면 안 됨
 		try:
 			tp_rate = float(get_setting('take_profit_rate', 10.0))
 			sl_rate = float(get_setting('stop_loss_rate', -10.0))
@@ -524,7 +546,10 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 			if pl_rt >= tp_rate:
 				logger.warning(f"[매수 금지] {stk_cd}: 현재 익절 구간({pl_rt}%)입니다. 매도 대기 중이므로 추가 매수 불가.")
 				return False
-			if pl_rt <= sl_rate:
+			
+			# [FIRE 전략] 불타기 중일 때는 손절 구간 체크가 무의미하므로(수익 중이니까) 패스
+			# WATER 전략일 때만 손절 구간에서 비중 체크
+			if single_strategy != 'FIRE' and pl_rt <= sl_rate:
 				# WATER 전략이라도 비중이 어느정도 찼을 수 있으니 보수적으로 접근
 				if filled_ratio > 0.5:
 					logger.warning(f"[매수 금지] {stk_cd}: 현재 손절 구간({pl_rt}%)이며 비중도 50% 이상입니다. 추가 매수 중단.")
