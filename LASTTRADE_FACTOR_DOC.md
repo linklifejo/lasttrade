@@ -47,106 +47,21 @@
 ```python
 타입: Integer
 기본값: 5
-옵션: [1, 3, 5, 10, 20, 30, 50]
+옵션: [1, 3, 5, 10]
 위치: settings_ui.py, check_n_buy.py, check_n_sell.py
 
 설명:
-  - 동시에 보유할 최대 종목 개수
-  - 분산 투자의 핵심 팩터
-
-전략별 추천:
-  - 몰빵 물타기: 1
-  - 몰빵 불타기: 1
-  - 분산 물타기: 5
-  - 분산 불타기: 5
-
-코드 적용:
-  - check_n_buy.py: 신규 매수 시 종목 수 제한
-  - check_n_sell.py: 종목당 할당 금액 계산
-    alloc_per_stock = (net_asset * capital_ratio) / target_cnt
-```
-
-#### **`target_profit_amt`** - 일일 목표 수익금
-```python
-타입: Integer (원 단위)
-기본값: 100000
-옵션: [10000, 50000, 100000, 300000, 500000, 1000000, 3000000]
-위치: settings_ui.py, chat_command.py
-
-설명:
-  - 이 금액 달성 시 당일 거래 종료
-  - 욕심 제어 및 안정적 수익 확보
-
-코드 적용:
-  - chat_command.py의 monitor_safety()에서 체크
-  - 달성 시 sell_all_stocks() 호출
-```
-
-#### **`global_loss_rate`** - 일일 손실 한도 (%)
-```python
-타입: Float (양수 입력, 저장 시 음수 변환)
-기본값: 3.0 (저장: -3.0)
-옵션: [1.0, 2.0, 3.0, 5.0, 10.0, 20.0, 30.0, 99.0]
-위치: settings_ui.py, chat_command.py
-
-설명:
-  - 계좌 전체 수익률이 이 값만큼 하락 시 전량 매도
-  - 예: 3.0 입력 → -3.0% 도달 시 손절
-
-전략별 추천:
-  - 몰빵: 3.0 (빠른 손절)
-  - 분산: 5.0 (여유)
-
-코드 적용:
-  - chat_command.py의 monitor_safety()에서 체크
-  - 총 수익률 < global_loss_rate 시 긴급 청산
-```
-
-#### **`liquidation_time`** - 당일 청산 시간
-```python
-타입: String (HH:MM)
-기본값: "15:18"
-옵션: ["15:10", "15:15", "15:18", "15:20", "15:25", "15:28", "15:30"]
-위치: settings_ui.py, market_hour.py, chat_command.py
-
-설명:
-  - 이 시간 도달 시 보유 종목 전량 매도
-  - 장 마감 전 포지션 정리
-
-코드 적용:
-  - market_hour.py: get_liquidation_time()으로 동적 로드
-  - chat_command.py: monitor_safety()에서 시간 체크
-  - 실전 모드에서만 작동
+  - 동시에 보유할 최대 종목 개수 (LASTTRADE 대원칙 준수)
 ```
 
 #### **`trading_capital_ratio`** - 매매 자금 비율 (%) ⭐
 ```python
 타입: Float
-기본값: 70.0
-옵션: [50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
-위치: settings_ui.py, check_n_buy.py, check_n_sell.py, bot.py
+기본값: 70.0 (대원칙: 예수금의 70%)
+위치: settings_ui.py, check_n_buy.py, check_n_sell.py
 
 설명:
-  - 총 자산 중 몇 %를 매매에 사용할지 결정
-  - 나머지는 예비 자금으로 보유
-  - 리스크 관리의 핵심 팩터
-
-전략별 추천:
-  - 모든 전략: 70.0 (안정적)
-  - 공격적: 90.0~100.0
-  - 보수적: 50.0~60.0
-
-코드 적용:
-  - check_n_buy.py:
-    capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
-    alloc_per_stock = (net_asset * capital_ratio) / target_cnt
-    
-    # 예: 총 자산 1000만원, capital_ratio=70%, target_cnt=5
-    #     → alloc_per_stock = 1000만 × 70% / 5 = 140만원
-  
-  - check_n_sell.py:
-    capital_ratio = float(cached_setting('trading_capital_ratio', 70)) / 100.0
-    alloc_per_stock = (net_asset * capital_ratio) / target_cnt
+  - 총 자산 중 몇 %를 매매에 사용할지 결정 (기본 70%)
 ```
 
 ---
@@ -156,118 +71,36 @@
 #### **`split_buy_cnt`** - 분할 매수 횟수
 ```python
 타입: Integer
-기본값: 3
-옵션: [1, 2, 3, 4, 5, 10]
-위치: settings_ui.py, check_n_buy.py, check_n_sell.py
+기본값: 5 (대원칙 권장)
+위치: settings_ui.py, check_n_buy.py
 
 설명:
   - 종목당 최대 몇 번에 나누어 매수할지 결정
-  - 1:1:2:4... 기하급수적 가중치 적용
-
-전략별 추천:
-  - 몰빵 물타기: 10 (세밀한 평단가 조정)
-  - 몰빵 불타기: 2 (빠른 집중)
-  - 분산 물타기: 10 (안정적 분할)
-  - 분산 불타기: 2 (효율적 집중)
-
-코드 적용:
-  - check_n_buy.py:
-    weights = []
-    for i in range(split_cnt_int):
-        if i < 2:
-            weights.append(1)
-        else:
-            weights.append(weights[-1] * 2)
-    
-    # 예: split_cnt=3 → weights=[1,1,2] → 비율=[25%, 50%, 100%]
-    # 예: split_cnt=2 → weights=[1,1] → 비율=[50%, 100%]
+  - **대원칙: 1:1:2:2:4 수열** 자동 적용
 ```
 
 #### **`single_stock_strategy`** - 단일 종목 전략
 ```python
 타입: String (Select)
-기본값: "FIRE"
+기본값: "WATER" (대원칙 기본 전략)
 옵션: ["FIRE", "WATER"]
-위치: settings_ui.py, check_n_buy.py, check_n_sell.py
 
 설명:
   - FIRE: 불타기 (수익 시 추가 매수)
-  - WATER: 물타기 (손실 시 추가 매수)
-
-코드 적용:
-  - check_n_buy.py:
-    if single_strategy == "FIRE":
-        if pl_rt >= strategy_rate:  # 수익 시 매수
-            should_buy = True
-    
-    elif single_strategy == "WATER":
-        if pl_rt <= -strategy_rate:  # 손실 시 매수
-            should_buy = True
-        elif pl_rt >= strategy_rate:  # 큰 수익 시도 매수 (하이브리드)
-            should_buy = True
-  
-  - check_n_sell.py:
-    if single_strategy == "WATER" and pl_rt < SL_RATE:
-        if pchs_amt < alloc_per_stock * 0.95:
-            # 매집 중에는 손절 스킵
-            continue
+  - WATER: 물타기 (손실 시 추가 매수, LASTTRADE 핵심 전략)
 ```
 
 #### **`single_stock_rate`** - 추가 매수 간격 (%)
 ```python
 타입: Float
-기본값: 3.0
-옵션: [1.0, 2.0, 3.0, 4.0, 5.0, 10.0]
-위치: settings_ui.py, check_n_buy.py
+기본값: 4.0
+옵션: [4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
 
 설명:
-  - 몇 % 움직일 때마다 추가 매수할지 결정
-  - 불타기: +N% 이상 시 매수
-  - 물타기: -N% 이하 시 매수
-
-전략별 추천:
-  - 몰빵 물타기: 1.0 (세밀한 평단가 조정)
-  - 몰빵 불타기: 3.0 (확실한 추세 확인)
-  - 분산 물타기: 1.0 (안정적)
-  - 분산 불타기: 3.0 (확신 후 집중)
-
-코드 적용:
-  - check_n_buy.py:
-    strategy_rate = float(get_setting('single_stock_rate', 1.0))
-    
-    # 불타기
-    if pl_rt >= strategy_rate:  # 예: +3% 이상
-        should_buy = True
-    
-    # 물타기
-    if pl_rt <= -strategy_rate:  # 예: -1% 이하
-        should_buy = True
+  - WATER 전략 시 설정된 % 하락 시마다 물타기 실행
 ```
 
-#### **`initial_buy_ratio`** - 초기 매수 비율 (%) ⭐ 신규
-```python
-타입: Float
-기본값: 10.0
-옵션: [10.0, 20.0, 25.0, 30.0, 33.3, 50.0, 100.0]
-위치: settings_ui.py, check_n_buy.py
-
-설명:
-  - 첫 매수 시 종목당 할당 금액의 몇 %를 사용할지 결정
-  - 리스크 최소화 및 추가 매수 여력 확보
-
-전략별 추천:
-  - 모든 전략: 10.0 (테스트 매수)
-
-코드 적용:
-  - check_n_buy.py:
-    if not is_holding:  # 신규 진입
-        initial_buy_ratio = float(get_setting('initial_buy_ratio', 10.0)) / 100.0
-        target_ratio_1st = cumulative_ratios[0] * initial_buy_ratio
-        one_shot_amt = alloc_per_stock * target_ratio_1st
-        
-        # 예: alloc_per_stock=200만원, initial_buy_ratio=10%
-        #     → one_shot_amt=20만원 (1차 매수)
-```
+---
 
 ---
 
