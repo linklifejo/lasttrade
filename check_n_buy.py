@@ -439,12 +439,13 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		# 현재 매입 비율
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
-		# [단계 판독 로직 정밀화] 1:1:2:2:4 수열에 따른 실제 투입액 기준
+		# [단계 판독 로직 정밀화 - LASTTRADE 수열 적용]
 		actual_current_step = 0
-		for i, threshold in enumerate(cumulative_ratios):
-			# 실제 투입된 돈이 목표 비중의 90% 이상이면 해당 단계 인정
-			if cur_pchs_amt >= (alloc_per_stock * threshold * 0.95):  # 90% -> 95% (정확도 향상)
-				actual_current_step = i + 1
+		if alloc_per_stock > 0:
+			for i, ratio in enumerate(cumulative_ratios):
+				# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
+				if cur_pchs_amt >= (alloc_per_stock * ratio * 0.98):
+					actual_current_step = i + 1
 		
 		# UI 표시용 단계 (최대 split_cnt로 제한)
 		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt

@@ -103,20 +103,28 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				try: pchs_amt = float(stock.get('pchs_avg_pric', 0)) * int(stock.get('rmnd_qty', 0))
 				except: pchs_amt = 0
 
-			# [단계 추정]
-			cur_step = 0
-			if 'watering_step' in stock:
-				cur_step = int(stock['watering_step'])
-			else:
-				# [단계 추정 단순화]
-				# 1회 설정이면 무조건 1차(MAX)로 간주 (보유하고 있으므로)
-				if split_buy_cnt == 1:
-					cur_step = 1
-				else:
-					if alloc_per_stock > 0:
-						ratio = pchs_amt / alloc_per_stock
-						cur_step = int(ratio * split_buy_cnt)
-						if cur_step < 1: cur_step = 1
+			# [단계 추정 정밀화 - LASTTRADE 수열 적용]
+			# 1:1:2:2:4... 방식의 누적 비중 리스트 생성
+			weights = []
+			for i in range(split_buy_cnt):
+				weights.append(2**(i // 2))
+			total_weight = sum(weights)
+			
+			cumulative_ratios = []
+			current_sum = 0
+			for w in weights:
+				current_sum += w
+				cumulative_ratios.append(current_sum / total_weight)
+
+			# 실제 투입 금액 기반 단계 판정
+			cur_step = 1
+			if alloc_per_stock > 0:
+				for i, ratio in enumerate(cumulative_ratios):
+					# 현재 매입금이 해당 단계 비중의 90% 이상이면 그 단계로 인정
+					if pchs_amt >= (alloc_per_stock * ratio * 0.98):
+						cur_step = i + 1
+			
+			is_max_bought = (cur_step >= split_buy_cnt)
 
 			# [Time-Cut 로직]
 			if held_since and stock_code in held_since:
@@ -126,7 +134,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				if elapsed_sec >= time_cut_limit:
 					if pl_rt < TIME_CUT_PROFIT:
 						should_sell = True
-						sell_reason = f"TimeCut({cur_step}차, {elapsed_sec/60:.0f}분)"
+						display_step_str = f"{cur_step}차" if cur_step < split_buy_cnt else "MAX"
+						sell_reason = f"TimeCut({display_step_str}, {elapsed_sec/60:.0f}분)"
 						logger.info(f"[Time-Cut] {stock_name}: {elapsed_sec/60:.0f}분 경과, 수익률({pl_rt}%) < 기준 -> 교체 매매")
 
 			# --------------------------------------------------------------------------------
@@ -147,32 +156,25 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					
 					if drop_rate >= TS_CALLBACK and pl_rt > 0:
 						should_sell = True
-						sell_reason = f"TrailingStop({cur_step}차)"
+						display_step_str = f"{cur_step}차" if cur_step < split_buy_cnt else "MAX"
+						sell_reason = f"TrailingStop({display_step_str})"
 						logger.info(f"🛡️ [LASTTRADE TS] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (익절 수익률: {pl_rt}%)")
 
 			# 2. [물타기(WATER) 전략 특수 손절 로직]
 			# 대원칙: 물타기 완료 후에는 추가 하락 시 즉시 매도하여 리스크 확정
 			if not should_sell and single_strategy == "WATER":
-				# [MAX 도달 판정] 
-				if split_buy_cnt <= 1:
-					is_max_bought = True
-				else:
-					# 실제 투입 금액이 할당액의 95% 이상이면 MAX로 간주
-					is_max_bought = (cur_step >= split_buy_cnt) or (pchs_amt >= alloc_per_stock * 0.95)
-				
 				# [대원칙 예시 반영] 손절률이 1%일 때, 물타기 완료 후 -3% 도달 시 매도
 				# 즉, SL_RATE보다 2% 더 하락한 지점을 임계치로 설정 (안전 마진)
 				max_sl_trigger = SL_RATE - 2.0 
 				if is_max_bought and pl_rt <= max_sl_trigger:
 					should_sell = True
-					sell_reason = f"WATER완성손절({cur_step}차)"
+					sell_reason = f"WATER완성손절(MAX)"
 					logger.warning(f"🚨 [LASTTRADE WATER MAX] {stock_name}: 물타기 완료 후 추가 하락({pl_rt}% <= {max_sl_trigger}%) -> 즉시 매도")
 				
 				# 추가적으로, 물타기 완료 후 수익권에서 다시 손실로 전환되는 경우도 방어 (0% 하향 돌파 시)
-				# (사용자 원칙의 '즉시 매도' 뉘앙스 반영)
-				elif is_max_bought and pl_rt < -0.5 and SL_RATE > -1.0: # 타이트한 손절 설정 시
+				elif is_max_bought and pl_rt < -0.5 and SL_RATE > -1.0: 
 				    should_sell = True
-				    sell_reason = f"MAX손실확정({cur_step}차)"
+				    sell_reason = f"MAX손실확정(MAX)"
 
 			# 3. [상한가 매도]
 			if not should_sell:
