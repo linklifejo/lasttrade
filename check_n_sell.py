@@ -163,13 +163,19 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# 2. [물타기(WATER) 전략 특수 손절 로직]
 			# 대원칙: 물타기 완료 후에는 추가 하락 시 즉시 매도하여 리스크 확정
 			if not should_sell and single_strategy == "WATER":
-				# [대원칙 예시 반영] 손절률이 1%일 때, 물타기 완료 후 -3% 도달 시 매도
-				# 즉, SL_RATE보다 2% 더 하락한 지점을 임계치로 설정 (안전 마진)
-				max_sl_trigger = SL_RATE - 2.0 
+				# [민감 제어] 물타기 완료(MAX) 후에는 슬리피지를 감안하여 '선제적'으로 손절
+				# 기존: SL_RATE - 2.0 (-6%) -> 결과 -6~8% (너무 큼)
+				# 수정: SL_RATE + 1.0 (-3%) -> 결과 -4~5% (목표 달성)
+				# 예: 손절선이 -4%라면, -3%만 되어도 탈출 시도 (슬리피지 1~2% 감안)
+				max_sl_trigger = SL_RATE + 1.0 
+				
+				# 단, 트리거가 0보다 크면 안 되므로(수익권 손절 방지) 캡 씌움
+				if max_sl_trigger > -0.5: max_sl_trigger = -0.5
+
 				if is_max_bought and pl_rt <= max_sl_trigger:
 					should_sell = True
-					sell_reason = f"WATER완성손절(MAX)"
-					logger.warning(f"🚨 [LASTTRADE WATER MAX] {stock_name}: 물타기 완료 후 추가 하락({pl_rt}% <= {max_sl_trigger}%) -> 즉시 매도")
+					sell_reason = f"WATER완성손절(MAX선제)"
+					logger.warning(f"🚨 [LASTTRADE WATER 민감방어] {stock_name}: MAX 비중 손실 확대({pl_rt}% <= {max_sl_trigger}%) -> 슬리피지 감안 선제 매도")
 				
 				# 추가적으로, 물타기 완료 후 수익권에서 다시 손실로 전환되는 경우도 방어 (0% 하향 돌파 시)
 				elif is_max_bought and pl_rt < -0.5 and SL_RATE > -1.0: 
