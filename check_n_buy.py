@@ -126,7 +126,7 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	
 	# [대원칙] 종목수 제한 및 종목별 한도 엄수
 	# 설정값 미리 로드
-	target_cnt = float(get_setting('target_stock_count', 5))
+	target_cnt = float(get_setting('target_stock_count', 1))
 	if target_cnt < 1: target_cnt = 1
 	
 	# [추가] 개별 종목 비중 초과 체크 (5차/MAX 방어)
@@ -272,10 +272,10 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 	
 	# [전략 설정 및 변수 정의]
 	capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
-	single_strategy = get_setting('single_stock_strategy', 'FIRE') # 전략 로드
-	strategy_rate = float(get_setting('single_stock_rate', 1.0)) # 기준 수익률 로드
+	single_strategy = get_setting('single_stock_strategy', 'WATER') # 전략 로드
+	strategy_rate = float(get_setting('single_stock_rate', 4.0)) # 기준 수익률 로드
 	split_cnt = int(get_setting('split_buy_cnt', 5)) # 분할 매수 횟수 로드
-	target_cnt = float(get_setting('target_stock_count', 5.0)) # 목표 종목 수 로드
+	target_cnt = float(get_setting('target_stock_count', 1.0)) # 목표 종목 수 로드
 	
 	# 현재가(호가) 정보 가져오기
 	try:
@@ -386,11 +386,11 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		# [수정] 최소 매수 금액 보장 (고가 주식도 매수 가능하도록)
 		# [수정] 최소 매수 금액 보장 (설정값 연동)
 		# 사용자가 설정한 최소 주문 금액을 불러옴 (기본값: 2,000원 - 소액 테스트용)
-		min_buy_setting = get_setting('min_purchase_amount', 2000)
+		min_buy_setting = get_setting('min_purchase_amount', 1000)
 		try:
 			MIN_PURCHASE_AMOUNT = int(str(min_buy_setting).replace(',', ''))
 		except:
-			MIN_PURCHASE_AMOUNT = 2000
+			MIN_PURCHASE_AMOUNT = 1000
 			
 		if one_shot_amt < MIN_PURCHASE_AMOUNT:
 			logger.info(f"[자금 조정] 1차 매수액({one_shot_amt:,.0f}원)이 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미만 → 상향 조정")
@@ -704,11 +704,22 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 def reset_accumulation(stk_cd):
 	"""외부(매도 로직)에서 매도 확정 시 내부 누적 데이터를 초기화기 위해 호출"""
 	global accumulated_purchase_amt
+	
+	# 1. 메모리 초기화
 	if stk_cd in accumulated_purchase_amt:
 		try:
 			del accumulated_purchase_amt[stk_cd]
-			logger.info(f"[Reset] {stk_cd}: 매도 확인되어 누적 매수금 데이터 초기화")
+			logger.info(f"[Reset] {stk_cd}: 매도 확인되어 누적 매수금 데이터(Memory) 초기화")
 		except: pass
+
+	# 2. DB 초기화 (중요: 재매수 시 1차부터 시작하도록 trades 테이블 정리)
+	try:
+		from database_trading_log import delete_stock_trades
+		from kiwoom_adapter import get_current_api_mode
+		mode = get_current_api_mode().upper()
+		delete_stock_trades(stk_cd, mode)
+	except Exception as e:
+		logger.error(f"[Reset Error] {stk_cd} DB 초기화 실패: {e}")
 
 def reset_accumulation_global():
 	"""모든 종목의 누적 매수 금액 데이터를 초기화합니다."""

@@ -183,6 +183,14 @@ def get_all_settings():
 def save_all_settings(settings_dict):
 	"""모든 설정 일괄 저장 (DB & 파일 동시 저장됨)"""
 	try:
+		# [Sync Fix] 키 동기화: 프론트엔드(stop_loss_rate)와 백엔드(sl_rate) 간 불일치 방지
+		if 'stop_loss_rate' in settings_dict:
+			settings_dict['sl_rate'] = settings_dict['stop_loss_rate']
+			logger.info(f"🔄 설정 키 동기화: stop_loss_rate({settings_dict['stop_loss_rate']}) -> sl_rate")
+		elif 'sl_rate' in settings_dict:
+			settings_dict['stop_loss_rate'] = settings_dict['sl_rate']
+			logger.info(f"🔄 설정 키 동기화: sl_rate({settings_dict['sl_rate']}) -> stop_loss_rate")
+
 		for key, value in settings_dict.items():
 			save_setting(key, value)
 		logger.info(f"설정 {len(settings_dict)}개 저장 완료")

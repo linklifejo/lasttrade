@@ -225,7 +225,7 @@
             <div id="view-settings" class="view">
                 <div class="view-header-actions"
                     style="display: flex; justify-content: center; align-items: center; margin-bottom: 30px; width: 100%;">
-                    <button id="save-settings" class="btn-save-large">💾 설정 저장 및 동기화</button>
+                    <button id="save-settings" class="btn-save-large" onclick="saveSettings()">💾 설정 저장 및 동기화</button>
                 </div>
 
                 <div class="settings-container">
@@ -260,7 +260,7 @@
                                     <option value="5000">5,000원</option>
                                     <option value="10000">10,000원</option>
                                     <option value="30000">30,000원</option>
-                                    <option value="50000" selected>50,000원</option>
+                                    <option value="50000">50,000원</option>
                                     <option value="100000">100,000원</option>
                                     <option value="200000">200,000원</option>
                                     <option value="500000">500,000원</option>
@@ -423,7 +423,7 @@
                                 <select id="trailing_stop_activation_rate" class="premium-select" style="width: 80px;">
                                     <option value="0.5">0.5%</option>
                                     <option value="1.0">1.0%</option>
-                                    <option value="1.5" selected>1.5%</option>
+                                    <option value="1.5">1.5%</option>
                                     <option value="2.0">2.0%</option>
                                     <option value="3.0">3.0%</option>
                                 </select>
@@ -431,7 +431,7 @@
                                     <option value="0.1">0.1%</option>
                                     <option value="0.2">0.2%</option>
                                     <option value="0.3">0.3%</option>
-                                    <option value="0.5" selected>0.5%</option>
+                                    <option value="0.5">0.5%</option>
                                     <option value="1.0">1.0%</option>
                                 </select>
                             </div>
@@ -572,7 +572,8 @@
                     </div>
 
                     <!-- Category 4: Authentication & Security -->
-                    <div class="settings-card glass-card" style="grid-column: span 3; margin-top: 20px;">
+                    <div class="settings-card glass-card"
+                        style="display: block !important; width: 100% !important; margin: 20px 0 !important; grid-column: 1 / -1 !important;">
                         <div class="card-header" style="margin-bottom: 20px;">
                             <span class="category-icon">🔑</span>
                             <h3>핵심 인증 정보 관리 (API Keys & Auth)</h3>
@@ -587,7 +588,8 @@
                                     <span class="setting-desc">KIS 실전 주식 앱 키</span>
                                 </div>
                                 <input type="text" id="real_app_key" class="premium-input"
-                                    style="flex: 1; font-family: monospace; font-size: 1.6rem;" placeholder="실전 앱 키">
+                                    style="flex: 1; font-family: monospace; font-size: 1.6rem; color: #ffffff !important; background-color: #2d2d2d !important; border: 1px solid #555;"
+                                    placeholder="실전 앱 키">
                             </div>
                             <div class="setting-row" style="padding: 12px 20px;">
                                 <div class="setting-info" style="flex: 0 0 250px;">
@@ -595,7 +597,8 @@
                                     <span class="setting-desc">KIS 실전 주식 앱 시크릿</span>
                                 </div>
                                 <input type="text" id="real_app_secret" class="premium-input"
-                                    style="flex: 1; font-family: monospace; font-size: 1.6rem;" placeholder="실전 앱 시크릿">
+                                    style="flex: 1; font-family: monospace; font-size: 1.6rem; color: #ffffff !important; background-color: #2d2d2d !important; border: 1px solid #555;"
+                                    placeholder="실전 앱 시크릿">
                             </div>
                             <div class="setting-row" style="padding: 12px 20px;">
                                 <div class="setting-info" style="flex: 0 0 250px;">
@@ -603,7 +606,8 @@
                                     <span class="setting-desc">KIS 모의 투자 앱 키</span>
                                 </div>
                                 <input type="text" id="paper_app_key" class="premium-input"
-                                    style="flex: 1; font-family: monospace; font-size: 1.6rem;" placeholder="모의 앱 키">
+                                    style="flex: 1; font-family: monospace; font-size: 1.6rem; color: #ffffff !important; background-color: #2d2d2d !important; border: 1px solid #555;"
+                                    placeholder="모의 앱 키">
                             </div>
                             <div class="setting-row" style="padding: 12px 20px;">
                                 <div class="setting-info" style="flex: 0 0 250px;">
@@ -611,7 +615,8 @@
                                     <span class="setting-desc">KIS 모의 투자 앱 시크릿</span>
                                 </div>
                                 <input type="text" id="paper_app_secret" class="premium-input"
-                                    style="flex: 1; font-family: monospace; font-size: 1.6rem;" placeholder="모의 앱 시크릿">
+                                    style="flex: 1; font-family: monospace; font-size: 1.6rem; color: #ffffff !important; background-color: #2d2d2d !important; border: 1px solid #555;"
+                                    placeholder="모의 앱 시크릿">
                             </div>
                             <div class="setting-row" style="padding: 12px 20px;">
                                 <div class="setting-info" style="flex: 0 0 250px;">
@@ -619,7 +624,7 @@
                                     <span class="setting-desc">@BotFather 발급 토큰</span>
                                 </div>
                                 <input type="text" id="telegram_token" class="premium-input"
-                                    style="flex: 1; font-family: monospace; font-size: 1.6rem;"
+                                    style="flex: 1; font-family: monospace; font-size: 1.6rem; color: #ffffff !important; background-color: #2d2d2d !important; border: 1px solid #555;"
                                     placeholder="Telegram Token">
                             </div>
                             <div class="setting-row" style="padding: 12px 20px;">
@@ -628,7 +633,8 @@
                                     <span class="setting-desc">명령어 수신 Chat ID</span>
                                 </div>
                                 <input type="text" id="telegram_chat_id" class="premium-input"
-                                    style="flex: 1; font-family: monospace; font-size: 1.6rem;" placeholder="Chat ID">
+                                    style="flex: 1; font-family: monospace; font-size: 1.6rem; color: #ffffff !important; background-color: #2d2d2d !important; border: 1px solid #555;"
+                                    placeholder="Chat ID">
                             </div>
                             <div class="setting-row"
                                 style="background: rgba(74, 158, 255, 0.05); border: 1px solid rgba(74, 158, 255, 0.2); padding: 20px; border-radius: 12px;">
@@ -638,7 +644,7 @@
                                     <span class="setting-desc">KIS 계좌번호 10~12자리 (모의/실전 통합 관리)</span>
                                 </div>
                                 <input type="text" id="my_account" class="premium-input"
-                                    style="width: 500px; text-align: center; border-color: #4a9eff; font-weight: 800; font-size: 2.2rem;"
+                                    style="width: 500px; text-align: center; border-color: #4a9eff; font-weight: 800; font-size: 2.2rem; color: #ffffff !important; background-color: #2d2d2d !important; border: 1px solid #555;"
                                     placeholder="계좌번호 입력">
                             </div>
                         </div>
@@ -667,7 +673,23 @@
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="/static/script_v5.js?v=20251229_1157"></script>
+    <!-- Main Logic -->
+    <script src="/static/script_v8.js?v=8"></script>
+
+    <!-- Force Load Settings -->
+    <script>
+        // 페이지 로드 후 즉시 설정 로드 강제 실행
+        window.addEventListener('load', function () {
+            console.log('🔥 강제 loadSettings 실행');
+            setTimeout(function () {
+                if (typeof loadSettings === 'function') {
+                    loadSettings();
+                } else {
+                    console.error('❌ loadSettings 함수를 찾을 수 없음');
+                }
+            }, 100);
+        });
+    </script>
 </body>
 
 </html>

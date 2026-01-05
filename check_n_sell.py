@@ -19,7 +19,7 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 
 	# [설정 로드]
 	TP_RATE = cached_setting('take_profit_rate', 10.0)
-	SL_RATE = cached_setting('stop_loss_rate', -10.0)
+	SL_RATE = cached_setting('stop_loss_rate', -1.0)
 	
 	# 트레일링 스탑
 	USE_TRAILING = cached_setting('use_trailing_stop', True)
@@ -27,9 +27,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 	TS_CALLBACK = cached_setting('trailing_stop_callback_rate', 0.5)
 	
 	# 일반 설정
-	target_cnt = float(cached_setting('target_stock_count', 5))
-	single_strategy = cached_setting('single_stock_strategy', 'FIRE')
-	split_buy_cnt = int(cached_setting('split_buy_cnt', 1)) # 기본값 1 (한 종목에 한 번만 진입)
+	target_cnt = float(cached_setting('target_stock_count', 1))
+	single_strategy = cached_setting('single_stock_strategy', 'WATER')
+	split_buy_cnt = int(cached_setting('split_buy_cnt', 5)) # 기본값 5
 	if target_cnt < 1: target_cnt = 1
 
 	sold_stocks = []

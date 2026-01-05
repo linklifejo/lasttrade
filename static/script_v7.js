@@ -666,73 +666,86 @@ const SETTING_KEYS = [
 ];
 
 async function loadSettings() {
+    console.log("🚀 loadSettings() 호출됨!");
     try {
         const res = await fetch('/api/settings');
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         const settings = await res.json();
+        console.log("📥 서버로부터 받은 설정값:", settings);
 
-        // [NEW] trading_mode 변환 로직 (MOCK/PAPER/REAL)
-        let tradingMode = 'MOCK'; // 기본값: Mock
+        // [DEBUG] 사용자 화면에 알림 표시
+        alert(`[DEBUG] 설정값 로드 성공! (Key 개수: ${Object.keys(settings).length})\nReal App Key: ${settings.real_app_key || '없음'}`);
 
-        // trading_mode 필드가 있으면 직접 사용
-        if (settings.trading_mode) {
-            tradingMode = settings.trading_mode.toUpperCase();
-        } else {
-            // 없으면 기존 필드에서 변환
-            if (settings.use_mock_server === true || settings.use_mock_server === 'true') {
-                tradingMode = 'MOCK';
-            } else if (settings.is_paper_trading === true || settings.is_paper_trading === 'true') {
-                tradingMode = 'PAPER';
-            } else {
-                tradingMode = 'REAL';
+        // [Stop Loss Rate 강제 주입 로직]
+        if (settings.stop_loss_rate !== undefined) {
+            console.log(`🔍 DB stop_loss_rate: ${settings.stop_loss_rate}`);
+            const slEl = document.getElementById('stop_loss_rate');
+            if (slEl) {
+                // 옵션 강제 추가 (만약 목록에 없으면)
+                const valStr = String(settings.stop_loss_rate);
+                if (![...slEl.options].some(o => o.value === valStr)) {
+                    const opt = document.createElement('option');
+                    opt.value = valStr;
+                    opt.textContent = `${valStr}% (DB)`;
+                    slEl.appendChild(opt);
+                }
+                slEl.value = valStr;
+                console.log(`✅ stop_loss_rate UI 적용 완료: ${slEl.value}`);
             }
         }
 
-        // trading_mode 설정
-        const tradingModeEl = document.getElementById('trading_mode');
-        if (tradingModeEl) {
-            tradingModeEl.value = tradingMode;
-        }
-
-        // Populate all input fields automatically
+        // [나머지 필드 자동 주입]
         for (const [key, value] of Object.entries(settings)) {
-            // trading_mode 관련 및 제거된 필드 스킵
-            if (key === 'use_mock_server' || key === 'is_paper_trading' || key === 'process_name' || key === 'auto_start') {
-                continue;
+            if (key === 'stop_loss_rate') continue; // 위에서 처리함
+
+            // [추가] 인증 정보 필드 명시적 처리
+            const credKeys = ['real_app_key', 'real_app_secret', 'paper_app_key', 'paper_app_secret', 'telegram_chat_id', 'telegram_token', 'my_account'];
+            if (credKeys.includes(key)) {
+                const el = document.getElementById(key);
+                if (el) {
+                    el.value = value || '';
+                    console.log(`🔑 인증정보 로드: ${key} = ${el.value ? '***' : '(empty)'}`);
+                }
+                continue; // 처리가 끝났으므로 다음 키로
             }
 
             const el = document.getElementById(key);
             if (el) {
-                try {
-                    if (el.tagName === 'SELECT') {
-                        const valStr = (value !== null && value !== undefined) ? value.toString() : '';
-                        if (![...el.options].some(o => o.value === valStr)) {
-                            const opt = document.createElement('option');
-                            opt.value = valStr;
-                            opt.textContent = valStr + (isNaN(value) ? '' : ' (Custom)');
-                            el.appendChild(opt);
-                        }
-                        el.value = valStr;
-                    } else if (el.type === 'checkbox') {
-                        el.checked = !!value;
-                    } else {
-                        el.value = (value !== null && value !== undefined) ? value : '';
+                if (el.tagName === 'SELECT') {
+                    const valStr = String(value);
+                    if (![...el.options].some(o => o.value === valStr)) {
+                        const opt = document.createElement('option');
+                        opt.value = valStr;
+                        opt.textContent = valStr + " (DB)";
+                        el.appendChild(opt);
                     }
-                } catch (fieldErr) {
-                    console.warn(`Error populating field ${key}:`, fieldErr);
+                    el.value = valStr;
+                } else if (el.type === 'checkbox') {
+                    el.checked = !!value;
+                } else {
+                    el.value = value;
+                }
+            } else if (key === 'sl_rate') {
+                // sl_rate 키로 왔는데 stop_loss_rate 엘리먼트가 아직 처리 안됐다면
+                const slEl = document.getElementById('stop_loss_rate');
+                if (slEl && (!settings.stop_loss_rate)) {
+                    slEl.value = String(value);
                 }
             }
         }
 
-        // [UX] API 모드 배지 업데이트 - 통합 함수 사용
-        updateBadge(settings.use_mock_server !== false, settings.is_paper_trading !== false);
+        // Trading Mode 처리
+        if (settings.trading_mode) {
+            const tm = document.getElementById('trading_mode');
+            if (tm) tm.value = settings.trading_mode;
+            updateBadge(settings.trading_mode === 'MOCK', settings.trading_mode === 'PAPER');
+        }
 
-        addLog('설정 로드 완료', 'success');
+        addLog(`설정 로드 완료 (Mode: ${settings.trading_mode || 'Unknown'})`, 'success');
 
-        // [Safety] 설정 로드 후 상태 연동
-        syncBadgePreview();
     } catch (e) {
-        console.error('Failed to load settings:', e);
-        addLog('설정 로드 실패', 'error');
+        console.error('❌ loadSettings 실패:', e);
+        addLog('설정 로드 실패: ' + e.message, 'error');
     }
 }
 
@@ -909,53 +922,25 @@ async function saveSettings() {
         const result = await response.json();
         console.log('📥 서버 응답:', result);
 
+        // 시각적 피드백 강화
         if (btnGeneral) btnGeneral.innerHTML = '✅ 저장 완료!';
         if (btnCreds) btnCreds.innerHTML = '✅ 저장 완료!';
 
-        // [NEW] 모드 표시 개선
-        let modeText = 'Mock';
-        if (!newSettings.use_mock_server) {
-            modeText = newSettings.is_paper_trading ? 'Paper' : 'Real';
-        }
+        // [UX] Toast 알림만 표시
+        showToast('✅ 설정이 성공적으로 저장되었습니다! (DB 동기화 완료)', 'success');
+        addLog(`시스템 설정이 업데이트되었습니다.`, 'success');
 
-        showToast('설정 저장 및 동기화 완료!', 'success');
-        addLog(`시스템 설정이 업데이트되었습니다. (모드: ${modeText})`, 'success');
-
-        // [UX] 즉시 UI 배지 갱신
-        updateBadge(newSettings.use_mock_server, newSettings.is_paper_trading);
-
-        // 저장 후 즉시 데이터 동기화 시도
-        console.log('🔄 모드 전환 감지 - 데이터 강제 갱신 시작');
-
-        // [Critical Fix] 모든 캐시 초기화
+        // [Critical Fix] 모든 캐시 초기화 및 다시 로드
         isTableInitialized = false;
         lastHoldingsJSON = '';
         globalTradingLogs = { buys: [], sells: [] };
-        lastTradeLogId = 0; // [Sync Fix] ID 리셋하여 새로운 모드 로그를 처음부터 가져오게 함
-        currentStats = null; // 통계 리셋
 
-        // UI 즉시 초기화 (보고서 상단)
-        document.getElementById('report-count').textContent = '0회';
-        document.getElementById('report-win-rate').textContent = '0%';
-        document.getElementById('report-total-profit').textContent = '0원';
-
-        // 잠시 대기 (봇이 명령을 수신하고 재초기화를 완료할 시간 부여)
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        await loadSettings();
-        await loadInitialStatus();
-        await loadTradingLog(true); // [Sync Fix] 강제 초기화 로드
-
-        // 추가 동기화 (네트워크 지연 등에 대비해 1초 후에 한 번 더 갱신)
+        // 1초 후 설정 다시 로드하여 화면 갱신 확인
         setTimeout(async () => {
-            await loadInitialStatus();
-            await loadTradingLog(true); // 강제 초기화 재시도
-        }, 1000);
+            await loadSettings();
+            await loadTradingLog(true);
 
-        console.log('✅ 데이터 갱신 완료');
-
-        // 1초 후 lock 해제 및 버튼 복구
-        setTimeout(() => {
+            // 버튼 복구
             if (btnGeneral) {
                 btnGeneral.innerHTML = originalTextGeneral || '💾 설정 저장 및 동기화';
                 btnGeneral.disabled = false;
@@ -973,11 +958,7 @@ async function saveSettings() {
             btnGeneral.innerHTML = '❌ 저장 실패';
             btnGeneral.disabled = false;
         }
-        if (btnCreds) {
-            btnCreds.innerHTML = '❌ 저장 실패';
-            btnCreds.disabled = false;
-        }
-        showToast('저장 실패: ' + e.message, 'error');
+        showToast('❌ 저장 실패: ' + e.message, 'error');
         window._is_saving_settings = false;
     }
 }
@@ -1691,8 +1672,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 이벤트 리스너 등록
-    targetStockCount?.addEventListener('change', applyAutoPreset);
-    strategy?.addEventListener('change', applyAutoPreset);
+    //     targetStockCount?.addEventListener('change', applyAutoPreset);
+    //     strategy?.addEventListener('change', applyAutoPreset);
 
     addLog('대시보드 초기화 완료');
     showToast('대시보드가 준비되었습니다', 'success');

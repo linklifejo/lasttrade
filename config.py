@@ -22,11 +22,11 @@ def log_config():
 class BotConfig:
     @property
     def is_paper_trading(self):
-        return get_setting('is_paper_trading', True)
+        return get_setting('is_paper_trading', False)
 
     @property
     def user_mock_setting(self):
-        return get_setting('use_mock_server', True)
+        return get_setting('use_mock_server', False)
 
     @property
     def real_app_key(self):

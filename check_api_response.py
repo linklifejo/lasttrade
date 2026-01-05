@@ -1,54 +1,45 @@
-"""
-API 응답 데이터 확인
-"""
+
 import requests
 import json
 
-print("=" * 60)
-print("API 응답 데이터 확인")
-print("=" * 60)
-
 try:
-    r = requests.get('http://localhost:8080/api/status')
-    data = r.json()
+    print("📡 웹 서버(API)에 설정값 요청 중... (http://localhost:8080/api/settings)")
+    response = requests.get('http://localhost:8080/api/settings', timeout=5)
     
-    if 'holdings' in data and len(data['holdings']) > 0:
-        print(f"\n총 {len(data['holdings'])}개 종목")
-        print("\n첫 번째 종목 데이터:")
-        print("-" * 60)
+    if response.status_code == 200:
+        data = response.json()
+        print("\n✅ [API 응답 성공] 웹 서버가 보내주는 실제 데이터:")
+        print("=" * 60)
         
-        first = data['holdings'][0]
-        for key, value in first.items():
-            print(f"  {key}: {value} (type: {type(value).__name__})")
+        # 주요 팩터 확인
+        keys_to_check = {
+            'stop_loss_rate': '개별 손절률',
+            'sl_rate': '개별 손절률(백업)',
+            'trading_mode': '거래 모드',
+            'target_stock_count': '목표 종목 수',
+            'take_profit_rate': '익절 수익률',
+            'split_buy_cnt': '분할 매수 횟수',
+            'single_stock_strategy': '전략',
+            'real_app_key': '실전 앱키',
+            'real_app_secret': '실전 시크릿',
+            'paper_app_key': '모의 앱키',
+            'paper_app_secret': '모의 시크릿'
+        }
         
-        print("\n" + "=" * 60)
-        print("수익률 계산 검증:")
-        print("-" * 60)
-        
-        avg_prc = first.get('avg_prc', 0)
-        cur_prc = first.get('cur_prc', 0)
-        qty = first.get('qty', 0)
-        pl_rt = first.get('pl_rt', '0')
-        
-        print(f"평균단가: {avg_prc:,}원")
-        print(f"현재가: {cur_prc:,}원")
-        print(f"수량: {qty:,}주")
-        print(f"서버 수익률: {pl_rt}%")
-        
-        if avg_prc > 0:
-            pur_amt = avg_prc * qty
-            evlt_amt = cur_prc * qty
-            pl_amt = evlt_amt - pur_amt
-            calc_rate = (pl_amt / pur_amt * 100) if pur_amt > 0 else 0
+        for key, label in keys_to_check.items():
+            val = data.get(key, '❌ 없음')
+            print(f"  - {label} ({key}): {val}")
             
-            print(f"\n재계산 수익률: {calc_rate:.2f}%")
-            print(f"차이: {abs(float(pl_rt) - calc_rate):.4f}%")
-    else:
-        print("보유 종목 없음")
+        print("=" * 60)
         
-except Exception as e:
-    print(f"오류: {e}")
-    import traceback
-    traceback.print_exc()
+        if str(data.get('stop_loss_rate')) == '-1.0':
+             print("🎉 결론: 웹 서버는 정확히 '-1.0'을 보내고 있습니다.")
+        else:
+             print(f"⚠️ 경고: 웹 서버가 엉뚱한 값({data.get('stop_loss_rate')})을 보내고 있습니다!")
+             
+    else:
+        print(f"❌ API 요청 실패: Status {response.status_code}")
 
-print("\n" + "=" * 60)
+except Exception as e:
+    print(f"❌ 연결 실패: {e}")
+    print("  (웹 서버가 켜져 있는지 확인해주세요)")

@@ -87,6 +87,58 @@ async def get_dashboard():
         return HTMLResponse(f"<h1>Error loading dashboard</h1><pre>{str(e)}</pre>", status_code=500)
 
 
+@app.get("/test", response_class=HTMLResponse)
+async def get_test_page():
+    """인증 정보 테스트 페이지"""
+    try:
+        from fastapi.responses import Response
+        html_file = BASE_DIR / "templates" / "test_credentials.html"
+        
+        if html_file.exists():
+            with open(html_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            return Response(
+                content=content,
+                media_type="text/html; charset=utf-8",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0"
+                }
+            )
+        else:
+            return HTMLResponse("<h1>Test page not found</h1>")
+    except Exception as e:
+        return HTMLResponse(f"<h1>Error: {e}</h1>", status_code=500)
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def get_settings_page():
+    """환경설정 페이지"""
+    try:
+        from fastapi.responses import Response
+        html_file = BASE_DIR / "templates" / "settings.html"
+        
+        if html_file.exists():
+            with open(html_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            return Response(
+                content=content,
+                media_type="text/html; charset=utf-8",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0"
+                }
+            )
+        else:
+            return HTMLResponse("<h1>Settings page not found</h1>")
+    except Exception as e:
+        return HTMLResponse(f"<h1>Error: {e}</h1>", status_code=500)
+
+
 
 
 

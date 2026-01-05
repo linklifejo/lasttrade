@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>환경설정 - LASTTRADE</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #ffffff;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            padding: 40px 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #4a9eff;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #aaa;
+            margin-bottom: 40px;
+        }
+
+        .section {
+            background: rgba(45, 45, 45, 0.8);
+            border: 2px solid #555;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+        }
+
+        .section h2 {
+            color: #10b981;
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .field {
+            margin-bottom: 25px;
+        }
+
+        .field label {
+            display: block;
+            color: #4a9eff;
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .field input {
+            width: 100%;
+            padding: 15px;
+            font-size: 16px;
+            background: #1a1a1a;
+            color: #ffffff;
+            border: 2px solid #555;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            transition: border-color 0.3s;
+        }
+
+        .field input:focus {
+            outline: none;
+            border-color: #4a9eff;
+        }
+
+        .field .desc {
+            color: #888;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 18px 40px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            border-radius: 10px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 20px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .back-link {
+            display: inline-block;
+            color: #4a9eff;
+            text-decoration: none;
+            margin-bottom: 20px;
+            font-size: 1.1rem;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .status.success {
+            background: rgba(16, 185, 129, 0.2);
+            border: 1px solid #10b981;
+            color: #10b981;
+        }
+
+        .status.error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← 대시보드로 돌아가기</a>
+
+        <h1>🔑 환경설정 및 인증 정보</h1>
+        <p class="subtitle">시스템 설정 및 API 인증 정보를 관리합니다</p>
+
+        <div class="section">
+            <h2>🔐 실전 투자 인증 정보</h2>
+
+            <div class="field">
+                <label>실전 App Key</label>
+                <input type="text" id="real_app_key" placeholder="한국투자증권 실전 앱 키를 입력하세요">
+                <div class="desc">KIS 실전 주식 거래용 앱 키</div>
+            </div>
+
+            <div class="field">
+                <label>실전 App Secret</label>
+                <input type="password" id="real_app_secret" placeholder="한국투자증권 실전 앱 시크릿을 입력하세요">
+                <div class="desc">KIS 실전 주식 거래용 앱 시크릿</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🧪 모의 투자 인증 정보</h2>
+
+            <div class="field">
+                <label>모의 App Key</label>
+                <input type="text" id="paper_app_key" placeholder="한국투자증권 모의 앱 키를 입력하세요">
+                <div class="desc">KIS 모의 투자용 앱 키</div>
+            </div>
+
+            <div class="field">
+                <label>모의 App Secret</label>
+                <input type="password" id="paper_app_secret" placeholder="한국투자증권 모의 앱 시크릿을 입력하세요">
+                <div class="desc">KIS 모의 투자용 앱 시크릿</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📱 텔레그램 알림 설정</h2>
+
+            <div class="field">
+                <label>텔레그램 봇 토큰</label>
+                <input type="text" id="telegram_token" placeholder="@BotFather에서 발급받은 토큰">
+                <div class="desc">텔레그램 봇 토큰 (예: 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz)</div>
+            </div>
+
+            <div class="field">
+                <label>텔레그램 채팅 ID</label>
+                <input type="text" id="telegram_chat_id" placeholder="알림을 받을 채팅 ID">
+                <div class="desc">본인의 텔레그램 채팅 ID (숫자)</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>💼 계좌 정보</h2>
+
+            <div class="field">
+                <label>계좌번호</label>
+                <input type="text" id="my_account" placeholder="계좌번호 (8~12자리)">
+                <div class="desc">한국투자증권 계좌번호 (모의/실전 통합 관리)</div>
+            </div>
+        </div>
+
+        <button class="btn" onclick="saveSettings()">💾 저장하기</button>
+
+        <div class="status" id="status"></div>
+    </div>
+
+    <script>
+        // 페이지 로드 시 기존 설정 불러오기
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const res = await fetch('/api/settings');
+                const settings = await res.json();
+
+                document.getElementById('real_app_key').value = settings.real_app_key || '';
+                document.getElementById('real_app_secret').value = settings.real_app_secret || '';
+                document.getElementById('paper_app_key').value = settings.paper_app_key || '';
+                document.getElementById('paper_app_secret').value = settings.paper_app_secret || '';
+                document.getElementById('telegram_token').value = settings.telegram_token || '';
+                document.getElementById('telegram_chat_id').value = settings.telegram_chat_id || '';
+                document.getElementById('my_account').value = settings.my_account || '';
+
+                console.log('✅ 설정 로드 완료');
+            } catch (e) {
+                console.error('설정 로드 실패:', e);
+                showStatus('설정을 불러오는데 실패했습니다: ' + e.message, 'error');
+            }
+        });
+
+        async function saveSettings() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = '💾 저장 중...';
+
+            try {
+                const settings = {
+                    real_app_key: document.getElementById('real_app_key').value,
+                    real_app_secret: document.getElementById('real_app_secret').value,
+                    paper_app_key: document.getElementById('paper_app_key').value,
+                    paper_app_secret: document.getElementById('paper_app_secret').value,
+                    telegram_token: document.getElementById('telegram_token').value,
+                    telegram_chat_id: document.getElementById('telegram_chat_id').value,
+                    my_account: document.getElementById('my_account').value
+                };
+
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+
+                if (res.ok) {
+                    showStatus('✅ 설정이 성공적으로 저장되었습니다!', 'success');
+                    btn.textContent = '✅ 저장 완료!';
+                    setTimeout(() => {
+                        btn.textContent = '💾 저장하기';
+                        btn.disabled = false;
+                    }, 2000);
+                } else {
+                    throw new Error('서버 응답 오류');
+                }
+            } catch (e) {
+                showStatus('❌ 저장 실패: ' + e.message, 'error');
+                btn.textContent = '💾 저장하기';
+                btn.disabled = false;
+            }
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status ' + type;
+            status.style.display = 'block';
+
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 5000);
+        }
+    </script>
+</body>
+
+</html>
