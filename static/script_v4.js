@@ -81,16 +81,29 @@ function connectWebSocket() {
 
 // ============ Dashboard Update ============
 
-async function loadInitialStatus() {
+async function fetchStatus() {
     try {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-        if (data && !data.error) {
-            updateDashboard(data);
+        // [Fix] Add timestamp to prevent caching
+        const [statusRes, logRes] = await Promise.all([
+            fetch('/api/status?t=' + Date.now()),
+            fetch('/api/trading_log?t=' + Date.now())
+        ]);
+
+        const statusData = await statusRes.json();
+        const logData = await logRes.json();
+
+        if (statusData && !statusData.error) {
+            updateDashboard(statusData);
             addLog('초기 상태 로드 완료', 'success');
         }
+        if (logData && !logData.error) {
+            // Assuming there's a function to update logs, e.g., updateLogsTable(logData.logs)
+            // For now, just log it or integrate with existing log update logic
+            console.log('Initial trading logs loaded:', logData.logs);
+            // Example: updateLogsTable(logData.logs); // You might need to add this function
+        }
     } catch (e) {
-        console.error('Failed to load initial status:', e);
+        console.error('Failed to load initial status or logs:', e);
     }
 }
 

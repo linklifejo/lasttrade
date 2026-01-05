@@ -198,10 +198,12 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					should_sell = True
 					sell_reason = f"익절({cur_step}차)"
 				elif pl_rt <= SL_RATE:
-					# WATER 전략은 위에서 MAX 단계별로 별도 처리했으므로, 여기서는 FIRE 또는 일반적인 경우 처리
-					if single_strategy == "FIRE" or is_max_bought:
-						should_sell = True
-						sell_reason = f"손절({cur_step}차)"
+					# [사용자 원칙] 전략(WATER/FIRE)이나 단계(MAX 여부)와 상관없이 
+					# 손절선(SL_RATE)을 건드리면 무조건 매도한다.
+					# 기존 제한(is_max_bought) 제거
+					should_sell = True
+					sell_reason = f"손절({cur_step}차)"
+					logger.warning(f"📉 [StopLoss] {stock_name}: 수익률 {pl_rt}% <= 손절선 {SL_RATE}% -> 즉시 손절 진행")
 
 			# --------------------------------------------------------------------------------
 			# [매도 실행]
