@@ -14,9 +14,25 @@ DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trading.db')
 
 def get_db_connection():
 	"""DB 연결 생성"""
-	conn = sqlite3.connect(DB_FILE, timeout=30)
-	conn.execute('PRAGMA journal_mode=WAL')
-	conn.row_factory = sqlite3.Row
+	conn = None
+	# [안정성 강화] DB Lock 발생 시 즉시 포기하지 않고 대기 (Busy Timeout 설정)
+	# 최대 30초(30000ms) 동안 Lock이 풀리기를 기다리도록 설정
+	# 또한, 연결 실패 시 5회까지 재시도
+	max_retries = 5
+	for attempt in range(max_retries):
+		try:
+			conn = sqlite3.connect(DB_FILE)
+			conn.row_factory = sqlite3.Row
+			# WAL 모드 활성화 (동시성 향상)
+			conn.execute("PRAGMA journal_mode=WAL")
+			# Busy Timeout 설정 (핵심: Lock 걸리면 기다려라)
+			conn.execute("PRAGMA busy_timeout = 30000")
+			return conn
+		except sqlite3.OperationalError as e:
+			if "locked" in str(e) and attempt < max_retries - 1:
+				time.sleep(0.5) # 0.5초 대기 후 재시도
+				continue
+			raise e
 	return conn
 
 # ==================== Held Times ====================

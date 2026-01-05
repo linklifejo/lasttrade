@@ -124,7 +124,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					if pchs_amt >= (alloc_per_stock * ratio * 0.98):
 						cur_step = i + 1
 			
-			is_max_bought = (cur_step >= split_buy_cnt)
+			# [수정] 비중 90% 이상이면 MAX로 간주 (1:1:2:2:4 수열 5단계까지 거의 다 찼음을 의미)
+			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+			is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.90)
 
 			# [Time-Cut 로직]
 			if held_since and stock_code in held_since:
@@ -161,26 +163,22 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						logger.info(f"🛡️ [LASTTRADE TS] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (익절 수익률: {pl_rt}%)")
 
 			# 2. [물타기(WATER) 전략 특수 손절 로직]
-			# 대원칙: 물타기 완료 후에는 추가 하락 시 즉시 매도하여 리스크 확정
+			# 대원칙: 물타기 중에는 버티되, MAX 도달 시에는 확실하게 자른다.
 			if not should_sell and single_strategy == "WATER":
-				# [민감 제어] 물타기 완료(MAX) 후에는 슬리피지를 감안하여 '선제적'으로 손절
-				# 기존: SL_RATE - 2.0 (-6%) -> 결과 -6~8% (너무 큼)
-				# 수정: SL_RATE + 1.0 (-3%) -> 결과 -4~5% (목표 달성)
-				# 예: 손절선이 -4%라면, -3%만 되어도 탈출 시도 (슬리피지 1~2% 감안)
-				max_sl_trigger = SL_RATE + 1.0 
+				if is_max_bought:
+					# [MAX 손절] 사용자가 정의한 로직: 평단(-2%) + SL(-1%) = -3% 이탈 시 매도
+					MAX_SL_TARGET = -3.0
+					
+					if pl_rt <= MAX_SL_TARGET:
+						should_sell = True
+						sell_reason = "MAX손절(-3%)"
+						logger.warning(f"🚫 [손절(MAX)] {stock_name}: MAX 매수 후 손절선({MAX_SL_TARGET}%) 이탈 -> 전량 매도 (현재:{pl_rt}%)")
 				
-				# 단, 트리거가 0보다 크면 안 되므로(수익권 손절 방지) 캡 씌움
-				if max_sl_trigger > -0.5: max_sl_trigger = -0.5
-
-				if is_max_bought and pl_rt <= max_sl_trigger:
+				# (옵션) 물타기 중이라도 너무 심한 폭락(-20%)은 끊어줌
+				elif pl_rt <= -20.0:
 					should_sell = True
-					sell_reason = f"WATER완성손절(MAX선제)"
-					logger.warning(f"🚨 [LASTTRADE WATER 민감방어] {stock_name}: MAX 비중 손실 확대({pl_rt}% <= {max_sl_trigger}%) -> 슬리피지 감안 선제 매도")
-				
-				# 추가적으로, 물타기 완료 후 수익권에서 다시 손실로 전환되는 경우도 방어 (0% 하향 돌파 시)
-				elif is_max_bought and pl_rt < -0.5 and SL_RATE > -1.0: 
-				    should_sell = True
-				    sell_reason = f"MAX손실확정(MAX)"
+					sell_reason = "재난손절(-20%)"
+					logger.warning(f"💀 [재난 손절] {stock_name}: 물타기 중이나 안전벨트(-20%) 이탈 -> 강제 청산")
 
 			# 3. [상한가 매도]
 			if not should_sell:

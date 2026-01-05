@@ -1,4 +1,5 @@
 import time
+import threading # [Lock] 동시성 제어 추가
 from kiwoom_adapter import fn_kt00001, fn_ka10004, fn_kt10000, fn_kt00004, get_total_eval_amt
 from tel_send import tel_send
 from get_setting import get_setting
@@ -22,8 +23,13 @@ last_buy_times = {}
 last_sold_times = {}
 # [추가] 종목별 누적 매수 금액 추적 (API 잔고 반영 지연 시 오버 매수 방지)
 accumulated_purchase_amt = {}
-# 매수 체크 함수
-def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None):
+
+# [Lock] 종목별 잠금 객체
+_stock_locks = {}
+_locks_mutex = threading.Lock()
+
+# 매수 체크 함수 (Core Logic)
+def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None):
 	global accumulated_purchase_amt # 전역 변수 사용
 	global last_sold_times # 매도 시간 추적용
 	
@@ -124,7 +130,41 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		logger.error(f"[매수 체크] 보유종목 조회 오류: {e}")
 		return False
 	
-	# [대원칙] 종목수 제한 및 종목별 한도 엄수
+	# [API 오류 방어] API가 잔고를 못 가져왔을 때 DB 기록 확인하여 중복 매수 방지
+	if current_holding is None:
+		try:
+			from database_helpers import get_db_connection
+			import datetime
+			today_str = datetime.date.today().strftime('%Y-%m-%d')
+			with get_db_connection() as conn:
+				# 오늘 매수 총합
+				row_buy = conn.execute("SELECT SUM(qty) FROM trades WHERE code=? AND type='buy' AND timestamp LIKE ?", (stk_cd, f"{today_str}%")).fetchone()
+				qty_buy = row_buy[0] if row_buy and row_buy[0] else 0
+				
+				# 오늘 매도 총합
+				row_sell = conn.execute("SELECT SUM(qty) FROM trades WHERE code=? AND type='sell' AND timestamp LIKE ?", (stk_cd, f"{today_str}%")).fetchone()
+				qty_sell = row_sell[0] if row_sell and row_sell[0] else 0
+				
+				net_qty = qty_buy - qty_sell
+				
+				if net_qty > 0:
+					logger.warning(f"[잔고 방어] {stk_cd}: API 잔고엔 없으나 DB상 오늘 {net_qty}주 순매수 기록 있음 -> 보유 중으로 간주")
+					# 가짜 holding 객체 생성 (수익률 0 -> 추가 매수 안 함)
+					current_holding = {
+						'stk_cd': stk_cd,
+						'stk_nm': stk_cd,
+						'rmnd_qty': net_qty,
+						'pl_rt': 0.0, 
+						'cur_prc': 0,
+						'pchs_avg_pric': 0,
+						'evlu_amt': 0
+					}
+		except Exception as e:
+			logger.error(f"[DB 잔고 체크 실패] {e}")
+
+	# [Memory Cache 방어] API와 DB 모두 실패해도, 봇 실행 중 매수했던 기록이 있으면 차단
+
+
 	# 설정값 미리 로드
 	target_cnt = float(get_setting('target_stock_count', 1))
 	if target_cnt < 1: target_cnt = 1
@@ -377,6 +417,17 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 			logger.info(f"[매수 스킵] {stk_cd}: 보유 종목 수({my_stocks_count}개)가 목표({int(target_cnt)}개)에 도달하여 신규 매수 금지")
 			return False
 
+		# [긴급 패치] 15시 이후 신규 진입 원천 봉쇄 (중복 매수 방지)
+		# 단, Mock 모드(테스트)일 때는 시간 제한 무시
+		import datetime
+		# from database_helpers import get_setting  <-- 삭제 (전역 사용)
+		is_mock = str(get_setting('use_mock_server', False)).lower() in ['1', 'true', 'on']
+		
+		# 실전 모드이면서 15시가 넘었을 때만 차단
+		if not is_mock and datetime.datetime.now().hour >= 15:
+			logger.warning(f"[시간 제한] 15시 이후 신규 매수 금지 ({stk_cd}) - 장 마감 임박")
+			return False
+
 		# [수정] 1:1:2:2:4 비율대로 직접 매수 (initial_buy_ratio 제거)
 		# 1단계 = 전체 할당액의 10% (가중치 1/10)
 		target_ratio_1st = cumulative_ratios[0]
@@ -414,12 +465,22 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		# [원칙 적용] 몰빵/분산 관계없이 추가 매수 조건을 체크합니다.
 		# 기존의 '분산 투자 시 추가 매수 금지' 로직은 제거되었습니다.
 			
-		# [추가 매수 - 불타기/물타기/분할]
+	# [추가 매수 - 불타기/물타기/분할]
 		# 현재 평가금액 확인
 		cur_eval = 0
 		cur_pchs_amt = 0 # 매입금액 (원금)
 		if 'evlu_amt' in current_holding and current_holding['evlu_amt']:
 			cur_eval = int(current_holding['evlu_amt'])
+			
+		# [중요 수정] 매입금액 정보가 없으면(0원이면) 추가 매수 계산 불가 -> 스킵 (DB방어/메모리방어 시 발생)
+		if 'pchs_amt' in current_holding and current_holding['pchs_amt']:
+			cur_pchs_amt = float(current_holding['pchs_amt'])
+		elif 'pur_amt' in current_holding and current_holding['pur_amt']:
+			cur_pchs_amt = float(current_holding['pur_amt'])
+			
+		if cur_pchs_amt <= 0:
+			logger.warning(f"[물타기 스킵] {stk_cd}: 매입금액 정보 없음(0원) - 데이터 불충분하여 추가 매수 중단")
+			return False
 			
 		# 매입금액 추정 (수익률 역산 또는 API 필드 사용)
 		# pchs_avg_pric(매입가) * rmnd_qty(보유수량) 사용이 가장 정확
@@ -450,34 +511,24 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		# UI 표시용 단계 (최대 split_cnt로 제한)
 		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt
 		
-		# 2. 손실액 기반 목표 단계 결정 (단위 손실액 420원 원리)
-		strategy_rate_val = float(get_setting('single_stock_rate', 1.5))
-		total_target_loss = alloc_per_stock * (strategy_rate_val / 100.0)
-		unit_loss_trigger = total_target_loss / split_cnt
+		# 2. [물타기 단계 계산 - 수익률 기반 직관적 로직]
+		# 사용자 규칙: 신규 매수 후 설정된 간격(예: 4%)만큼 떨어질 때마다 다음 단계 진입
+		# 사용자 규칙: 신규 매수 후 설정된 간격(예: 4%)만큼 떨어질 때마다 다음 단계 진입
+		strategy_rate_val = float(get_setting('single_stock_rate', 4.0))
+		logger.info(f"[Debug] {stk_cd} 물타기 간격 설정값: {strategy_rate_val}%") # [Debug Log]
+		if strategy_rate_val <= 0: strategy_rate_val = 4.0
 		
-		evlu_pnl = 0
-		if current_holding:
-			for field in ['evlu_pnl', 'evpnl_amt', 'pnl_amt', 'pchs_pnl_amt']:
-				if field in current_holding and current_holding[field]:
-					try:
-						evlu_pnl = float(current_holding[field])
-						if evlu_pnl != 0: break
-					except: continue
-			if evlu_pnl == 0:
-				try:
-					cur_prc = float(current_holding.get('cur_prc', 0))
-					pchs_avg = float(current_holding.get('pchs_avg_pric', 0))
-					qty = int(current_holding.get('rmnd_qty', 0))
-					if cur_prc > 0 and pchs_avg > 0 and qty > 0:
-						evlu_pnl = (cur_prc - pchs_avg) * qty
-				except: pass
-
-		current_loss_amt = abs(evlu_pnl) if evlu_pnl < 0 else 0
-		if current_loss_amt == 0 and pl_rt < 0:
-			current_loss_amt = abs(cur_pchs_amt * (abs(pl_rt) / 100.0))
-		
-		# 손실액 비례 목표 단계
-		target_step_by_amt = int(current_loss_amt / unit_loss_trigger) if unit_loss_trigger > 0 else 0
+		# 현재 수익률이 마이너스일 때만 계산
+		if pl_rt < 0:
+			# 예: -4.5% / 4% = 1.125 -> 1 (즉, 1단계 추가 -> 2차 매수)
+			# 예: -9.0% / 4% = 2.25 -> 2 (즉, 2단계 추가 -> 3차 매수)
+			target_step_by_amt = int(abs(pl_rt) / strategy_rate_val)
+		else:
+			target_step_by_amt = 0
+			
+		# 더미 변수 설정 (로깅용)
+		current_loss_amt = 0
+		unit_loss_trigger = 0
 
 		# [FIRE 전략 보강] 수익 발생 시 불타기 단계 계산
 		if single_strategy == 'FIRE' and pl_rt > 0:
@@ -500,8 +551,21 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 			target_step_by_amt = target_step_fire
 			logger.info(f"🔥 [FIRE 분석] 수익률 {pl_rt}% (간격 {fire_interval}%) -> 불타기 목표: {target_step_by_amt+1}차")
 
+						
 		if target_step_by_amt >= split_cnt: target_step_by_amt = split_cnt - 1
 		
+		# [Critical Fix] 수익률 기반 강력 방어 (금액 로직 무시)
+		# 현재 단계(actual_current_step)가 1 이상(보유 중)일 때,
+		# 수익률이 다음 단계 트리거(예: -4%, -8%)에 도달하지 않았으면 매수 원천 차단
+		if 'WATER' in single_strategy and actual_current_step >= 1:
+			# 현재 단계에 따른 다음 목표 수익률 (예: 1단계 보유 중이면 -4%가 되어야 2단계 진입)
+			next_target_rate = -1.0 * strategy_rate_val * actual_current_step
+			
+			# 여유폭(buffer) 0.1% 감안
+			if pl_rt > (next_target_rate + 0.1):
+				logger.info(f"[물타기 방어] {stk_cd}: 현재 {pl_rt}% > 목표 {next_target_rate}% (단계:{actual_current_step}) -> 추가 매수 금지")
+				return False
+				
 		# 3. 추가 매수 결정
 		target_ratio_val = 0
 		next_step_idx = 0
@@ -568,7 +632,7 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 		
 		if one_shot_amt >= 2000: # 최소 2천원 이상일 때만 (소액 테스트)
 			should_buy = True
-			tag = "물타기" if evlu_pnl < 0 else "불타기"
+			tag = "물타기" if pl_rt < 0 else "불타기"
 			msg_prefix = f"{tag}(목표단계:{target_step_by_amt+1})"
 		else:
 			# 매수 조건 미달 시 관망 로그 (이미 위에서 판독 로그가 찍혔으므로 필요시만 추가)
@@ -630,10 +694,16 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 
 	if bid > 0:
 		ord_qty = int(expense // bid)  # 내림하여 정수로 변환
-		# [Bug Fix] 매수 금액이 주당 가격보다 적으면 0주가 되어 매수가 안 됨 -> 최소 1주 매수
+		# [Bug Fix & 오버 매수 방지]
 		if ord_qty == 0 and expense > 0:
-			logger.info(f"[수량 보정] {stk_cd}: 목표액({expense:,.0f}원)이 단가({bid:,.0f}원)보다 작음 -> 최소 1주 매수 시도")
-			ord_qty = 1
+			# 이미 비중이 90% 이상 찼는데 1주도 못 살 돈만 남았다면 -> 굳이 무리해서 사지 않고 종료 (오버 매수 방지)
+			# 단, 아주 극초기라면 최소 1주는 사야 함
+			if filled_ratio >= 0.9:
+				logger.warning(f"[오버 매수 방지] {stk_cd}: 목표 비중 임박({filled_ratio*100:.1f}%) -> 잔여금액({expense:,.0f}원)이 1주 가격({bid:,.0f}원)보다 적어 매수 포기")
+				return False
+			else:
+				logger.info(f"[수량 보정] {stk_cd}: 목표액({expense:,.0f}원)이 단가({bid:,.0f}원)보다 작음 -> 최소 1주 매수 시도")
+				ord_qty = 1
 		
 		if ord_qty == 0:
 			logger.warning(f"주문할 주식 수량이 0입니다. (단가: {bid:,}원)")
@@ -654,6 +724,12 @@ def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, h
 			return False
 		else:
 			logger.info(f"주문 성공 확인 (Code: {return_code})")
+			
+			# [Memory Cache] 금일 매수 종목 등록 (중복 진입 방지용)
+			# 재시작 전까지 유효하며, 비정상적인 연속 매수를 막아줌
+			global today_buy_attempts
+			if 'today_buy_attempts' not in globals(): today_buy_attempts = set()
+			today_buy_attempts.add(stk_cd)
 			
 	except Exception as e:
 		logger.error(f"주문 중 오류 발생: {e}")
@@ -726,6 +802,33 @@ def reset_accumulation_global():
 	global accumulated_purchase_amt
 	accumulated_purchase_amt.clear()
 	logger.info("내부 누적 매수 금액 데이터(accumulated_purchase_amt)가 초기화되었습니다.")
+
+# [Wrapper] 외부에서 호출하는 함수 (Thread-Safe 적용)
+def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None):
+	"""
+	[Thread-Safe Wrapper]
+	동시에 같은 종목에 대한 매수 로직이 실행되지 않도록 Lock을 적용.
+	"""
+	global _stock_locks, _locks_mutex
+	
+	# 종목별 Lock 객체 가져오기 (없으면 생성)
+	with _locks_mutex:
+		if stk_cd not in _stock_locks:
+			_stock_locks[stk_cd] = threading.Lock()
+		my_lock = _stock_locks[stk_cd]
+	
+	# Lock 획득 시도 (blocking=False: 이미 누가 하고 있으면 쿨하게 포기)
+	# Race Condition 방지의 핵심: 줄 서지 말고 그냥 돌아가라.
+	if not my_lock.acquire(blocking=False):
+		# logger.debug(f"[중복 방지] {stk_cd}: 이미 매수 로직이 실행 중입니다. (Skip)")
+		return False
+		
+	try:
+		# 실제 로직 실행 (인자 그대로 전달)
+		return _chk_n_buy_core(stk_cd, token, current_holdings, current_balance_data, held_since, outstanding_orders, response_manager, realtime_data)
+	finally:
+		# 반드시 Lock 해제
+		my_lock.release()
 
 if __name__ == '__main__':
 	chk_n_buy('005930', token=get_token())
