@@ -369,9 +369,14 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 
 	logger.info(f"매매 자금 비율: {capital_ratio*100:.0f}% (순자산: {int(net_asset or 0):,})")
 	
+	# [수정] 최소 매수 금액 보장 (설정값 연동)
+	min_buy_setting = get_setting('min_purchase_amount', 2000)
+	try:
+		MIN_PURCHASE_AMOUNT = int(str(min_buy_setting).replace(',', ''))
+	except:
+		MIN_PURCHASE_AMOUNT = 2000
+
 	# 종목당 총 배정 금액 (순자산의 설정 비율만큼 사용 * 수학적 가중치)
-	# 예를 들어 자산 1000만원, 종목 5개, 비율 50%, 가중치 1.2인 경우
-	# ((1000만 * 0.5) / 5) * 1.2 = 120만원이 종목당 할당액
 	alloc_per_stock = ((net_asset * capital_ratio) / target_cnt) * math_weight
 	
 	# [1:1:2:4... 기하급수적 분할 매수 로직 적용]
@@ -454,20 +459,9 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		one_shot_amt = alloc_per_stock * target_ratio_1st
 		logger.info(f"[신규 매수] {stk_cd}: 1단계 비율 {target_ratio_1st*100:.1f}% 적용")
 		
-		# [수정] 최소 매수 금액 보장 (고가 주식도 매수 가능하도록)
-		# [수정] 최소 매수 금액 보장 (설정값 연동)
-		# 사용자가 설정한 최소 주문 금액을 불러옴 (기본값: 2,000원 - 소액 테스트용)
-		min_buy_setting = get_setting('min_purchase_amount', 1000)
-		try:
-			MIN_PURCHASE_AMOUNT = int(str(min_buy_setting).replace(',', ''))
-		except:
-			MIN_PURCHASE_AMOUNT = 1000
-			
+		# [수정] 최소 매수 금액 보장
 		if one_shot_amt < MIN_PURCHASE_AMOUNT:
-			logger.info(f"[자금 조정] 1차 매수액({one_shot_amt:,.0f}원)이 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미만 → 상향 조정")
-			one_shot_amt = MIN_PURCHASE_AMOUNT
-		if one_shot_amt < MIN_PURCHASE_AMOUNT:
-			logger.info(f"[자금 조정] 1차 매수액({one_shot_amt:,.0f}원)이 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미만 → 상향 조정")
+			logger.info(f"[자금 조정] 1차 매수액({one_shot_amt:,.0f}원)이 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미달 → 상향 조정")
 			one_shot_amt = MIN_PURCHASE_AMOUNT
 		
 		# [중요] 예수금 부족 시 매수 방어 로직 (신규 진입 시)
@@ -531,16 +525,12 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		if alloc_per_stock > 0:
 			# [소액 계좌 보정] 할당액이 너무 적으면(예: 5만원 미만), 금액 기반 판독이 왜곡됨.
 			if alloc_per_stock < 50000:
-				# 수익률 기반은 문제(평단 하락=단계 후퇴)가 있으므로 매입금액 기반 수량 추정으로 변경
-				min_amt = float(get_setting('min_buy_amount', 2000))
-				if min_amt <= 0: min_amt = 2000
-				
-				# 예: 2000원 -> 1차, 2300원(2주) -> 2차 (올림 처리하여 싼 주식도 단계 인정)
-				import math
-				actual_current_step = int(math.ceil(cur_pchs_amt / min_amt))
+				# [수정] 설정된 최소 금액 연동 (수익률 기반 단계 판독의 한계 보완)
+				# 싼 주식도 단계 인정 (올림 처리)
+				actual_current_step = int(math.ceil(cur_pchs_amt / MIN_PURCHASE_AMOUNT))
 				if actual_current_step < 1: actual_current_step = 1
 				
-				logger.info(f"[소액 보정] {stk_cd}: 매입금({cur_pchs_amt:,.0f}원)/단위({min_amt}원) -> 물리적 단계({actual_current_step}차) 적용")
+				logger.info(f"[소액 보정] {stk_cd}: 매입금({cur_pchs_amt:,.0f}원)/단위({MIN_PURCHASE_AMOUNT}원) -> 물리적 단계({actual_current_step}차) 적용")
 			else:
 				for i, ratio in enumerate(cumulative_ratios):
 					if cur_pchs_amt >= (alloc_per_stock * ratio * 0.98):
@@ -629,16 +619,10 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# [Log] 금액 기반 판단 근거 기록
 		logger.info(f"📊 [금액기준 판독] {stk_cd}: 현재손실 {int(current_loss_amt):,}원 (트리거:{int(unit_loss_trigger)}원) -> 목표단계:{target_step_by_amt+1}/{int(split_cnt)}")
 		
-		# [수정] 사용자 설정 최소 매수 금액 연동
-		try:
-			min_buy_setting = get_setting('min_purchase_amount', 2000)
-			MIN_ORD_AMT = int(str(min_buy_setting).replace(',', ''))
-		except:
-			MIN_ORD_AMT = 2000
-
-		if one_shot_amt > 0 and one_shot_amt < MIN_ORD_AMT:
-			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원) 최소 기준({MIN_ORD_AMT:,.0f}원) 미달 → {MIN_ORD_AMT:,.0f}원 조정")
-			one_shot_amt = MIN_ORD_AMT
+		# [수정] 이미 위에서 정의된 MIN_PURCHASE_AMOUNT 사용
+		if one_shot_amt > 0 and one_shot_amt < MIN_PURCHASE_AMOUNT:
+			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원) 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미달 → {MIN_PURCHASE_AMOUNT:,.0f}원 조정")
+			one_shot_amt = MIN_PURCHASE_AMOUNT
 
 		if filled_ratio >= 0.98:
 			logger.info(f"[매수 스킬] {stk_cd}: 이미 목표 비중({filled_ratio*100:.1f}%) 도달")
@@ -673,7 +657,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		should_buy = False
 		msg_prefix = ""
 		
-		if one_shot_amt >= MIN_ORD_AMT: # 설정된 최소 금액 이상일 때만 매수
+		if one_shot_amt >= MIN_PURCHASE_AMOUNT: # 설정된 최소 금액 이상일 때만 매수
 			should_buy = True
 			tag = "물타기" if pl_rt < 0 else "불타기"
 			msg_prefix = f"{tag}(목표단계:{target_step_by_amt+1})"
@@ -714,8 +698,8 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		logger.warning(f"목표 매수액({expense:,.0f}원) > 주문가능현금({balance:,.0f}원) -> 현금 전액 사용")
 		expense = balance
 	
-	# 최종 점검: 너무 소액인 경우 매수 스킵 (예: 2000원 미만)
-	if expense < 2000:
+	# 최종 점검: 너무 소액인 경우 매수 스킵
+	if expense < MIN_PURCHASE_AMOUNT:
          # 단, 잔고가 거의 0에 수렴하는 경우는 위에서 걸러졌을 것이고, 
          # 여기서 걸리는 건 배정 한도가 꽉 찼거나 하는 경우임.
 		logger.warning(f"[매수 스킵] 최종 매출액({expense:,.0f}원)이 너무 적습니다.")
