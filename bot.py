@@ -679,8 +679,8 @@ class MainApp:
 					if pl_rt == 0.0 and pur_amt > 0:
 						pl_rt = ((evlt_amt - pur_amt) / pur_amt) * 100
 					
-					# [Safety] 수익률이 -90% 밑이면 데이터 오류 가능성 -> 0% 처리
-					if pl_rt < -90.0:
+					# [Safety] 현재가 0원(데이터 오류)이면 수익률도 0% 처리 (잘못된 물타기/손절 방지)
+					if cur_prc <= 0 or pl_rt < -90.0:
 						pl_rt = 0.0
 						
 					item['pl_rt'] = f"{pl_rt:.2f}"
@@ -722,7 +722,7 @@ class MainApp:
 					
 					# 최종 단계 = 수익률 기준(f_step)과 금액 기준(a_step) 중 큰 것 + 기본 진입(1)
 					# 신규 진입 시 0이 아니라 1부터 시작하도록 보정
-					computed_step = max(f_step + 1, a_step)
+					computed_step = a_step
 					if computed_step < 1: computed_step = 1
 					
 					# [UI Labeling]

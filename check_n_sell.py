@@ -154,9 +154,10 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 							cur_step = i + 1
 			
 			# [수정] 비중 90% 조건 삭제 (마틴게일 4차/5차 구분 명확화 필요)
-			# 4차(50%)와 5차(100%) 차이가 크므로, 섣불리 금액 비율로 MAX 판정하면 안 됨.
-			# 오직 계산된 단계(cur_step)가 5차 이상일 때만 MAX로 인정.
-			is_max_bought = (cur_step >= split_buy_cnt)
+			# [진짜 수정] 금액 비율(Ratio) 기반 MAX 판정 (UI와 동기화)
+			# 금액이 할당량의 70% 이상이면, 설령 계산상 4차라도 MAX(5차) 급으로 간주하여 손절/익절 로직 적용
+			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+			is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.70)
 
 			# [Time-Cut 로직]
 			if held_since and stock_code in held_since:
@@ -195,8 +196,13 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# 2. [물타기(WATER) 전략 특수 손절 로직]
 			# 대원칙: 물타기 중에는 버티되, MAX 도달 시에는 확실하게 자른다.
 			if not should_sell and single_strategy == "WATER":
-				if is_max_bought:
-					# [MAX 손절] 마틴게일 방어선(-2%) + 사용자 설정 손절선(SL_RATE, 음수)
+				# [수정] MAX 혹은 MAX 바로 전 단계(4차)에서도 손절선(-3%) 닿으면 조기 탈출
+				# "굳이 5차(최대)까지 가서 손해 볼 필요 없다"는 사용자 철학 반영
+				# 조건: (MAX 상태) 또는 (MAX-1 단계 and 비중 어느정도 찼을 때)
+				check_stop_loss = is_max_bought or (cur_step >= split_buy_cnt - 1)
+				
+				if check_stop_loss:
+					# [MAX/조기 손절] 마틴게일 방어선(-2%) + 사용자 설정 손절선(SL_RATE, 음수)
 					# 예: SL_RATE가 -1%이면 -> -2% + (-1%) = -3%
 					MAX_SL_TARGET = -2.0 + SL_RATE
 					
@@ -205,11 +211,12 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						sell_reason = "MAX손절(-3%)"
 						logger.warning(f"🚫 [손절(MAX)] {stock_name}: MAX 매수 후 손절선({MAX_SL_TARGET}%) 이탈 -> 전량 매도 (현재:{pl_rt}%)")
 				
-				# (옵션) 물타기 중이라도 너무 심한 폭락(-20%)은 끊어줌
-				elif pl_rt <= -20.0:
+				# (옵션) 물타기 중이라도 너무 심한 손실(-6%)은 끊어줌
+				# (예수금 부족으로 추가 매수를 못 해서 평단 관리가 안 되는 경우 등)
+				elif pl_rt <= -6.0:
 					should_sell = True
-					sell_reason = "재난손절(-20%)"
-					logger.warning(f"💀 [재난 손절] {stock_name}: 물타기 중이나 안전벨트(-20%) 이탈 -> 강제 청산")
+					sell_reason = "재난손절(-6%)"
+					logger.warning(f"💀 [재난 손절] {stock_name}: 손실 확대(-6%) 및 추가매수 불가 판단 -> 강제 청산")
 
 			# 3. [상한가 매도]
 			if not should_sell:

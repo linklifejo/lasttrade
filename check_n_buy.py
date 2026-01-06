@@ -532,6 +532,14 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# 수익률 확인
 		pl_rt = float(current_holding.get('pl_rt', 0))
 		
+		# [Safety] 현재가가 0원이면 수익률도 믿을 수 없음 -> 0으로 강제 초기화 (매수 방지)
+		try:
+			cur_prc_chk = float(str(current_holding.get('cur_prc', '0')).replace(',', ''))
+			if cur_prc_chk <= 0:
+				pl_rt = 0.0
+				logger.warning(f"⚠️ [Data Warning] {stk_cd}: 현재가 0원 -> 수익률 0% 처리 (매수 보류)")
+		except: pass
+		
 		# 현재 매입 비율
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
