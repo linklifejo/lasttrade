@@ -629,10 +629,16 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# [Log] 금액 기반 판단 근거 기록
 		logger.info(f"📊 [금액기준 판독] {stk_cd}: 현재손실 {int(current_loss_amt):,}원 (트리거:{int(unit_loss_trigger)}원) -> 목표단계:{target_step_by_amt+1}/{int(split_cnt)}")
 		
-		# [수정] 소액 테스트를 위해 최소금액 하향 (50000 -> 2000)
-		if one_shot_amt > 0 and one_shot_amt < 2000:
-			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원) 최소 기준 미달 → 2000원 조정")
-			one_shot_amt = 2000
+		# [수정] 사용자 설정 최소 매수 금액 연동
+		try:
+			min_buy_setting = get_setting('min_purchase_amount', 2000)
+			MIN_ORD_AMT = int(str(min_buy_setting).replace(',', ''))
+		except:
+			MIN_ORD_AMT = 2000
+
+		if one_shot_amt > 0 and one_shot_amt < MIN_ORD_AMT:
+			logger.info(f"[자금 조정] 추가 매수액({one_shot_amt:,.0f}원) 최소 기준({MIN_ORD_AMT:,.0f}원) 미달 → {MIN_ORD_AMT:,.0f}원 조정")
+			one_shot_amt = MIN_ORD_AMT
 
 		if filled_ratio >= 0.98:
 			logger.info(f"[매수 스킬] {stk_cd}: 이미 목표 비중({filled_ratio*100:.1f}%) 도달")
@@ -667,7 +673,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		should_buy = False
 		msg_prefix = ""
 		
-		if one_shot_amt >= 2000: # 최소 2천원 이상일 때만 (소액 테스트)
+		if one_shot_amt >= MIN_ORD_AMT: # 설정된 최소 금액 이상일 때만 매수
 			should_buy = True
 			tag = "물타기" if pl_rt < 0 else "불타기"
 			msg_prefix = f"{tag}(목표단계:{target_step_by_amt+1})"
