@@ -386,8 +386,13 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	split_cnt_int = int(split_cnt)
 	weights = []
 	for i in range(split_cnt_int):
-		# [대원칙 준수] 2단계마다 2배씩 증가하는 사용자 수열 (1, 1, 2, 2, 4, 4...)
-		weight = 2**(i // 2)
+		# [수정] 사용자 요청에 따라 완벽한 배수 수열 적용 (1, 1, 2, 4, 8, 16...)
+		# i=0 -> 2^0 = 1
+		# i=1 -> 2^0 = 1
+		# i=2 -> 2^1 = 2
+		# i=3 -> 2^2 = 4
+		if i == 0: weight = 1
+		else: weight = 2**(i - 1)
 		weights.append(weight)
 			
 	total_weight = sum(weights)
@@ -582,8 +587,9 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# 현재 단계(actual_current_step)가 1 이상(보유 중)일 때,
 		# 수익률이 다음 단계 트리거(예: -4%, -8%)에 도달하지 않았으면 매수 원천 차단
 		if 'WATER' in single_strategy and actual_current_step >= 1:
-			# 현재 단계에 따른 다음 목표 수익률 (예: 1단계 보유 중이면 -4%가 되어야 2단계 진입)
-			next_target_rate = -1.0 * strategy_rate_val * actual_current_step
+			# [수정] 평단가 기준 고정 간격 물타기 (항상 -4% 하락 시 추매)
+			# 기존: -4% * 단계 (점점 깊어짐) -> 수정: -4% 고정 (평단이 낮아졌으므로 상대적 기준)
+			next_target_rate = -1.0 * strategy_rate_val 
 			
 			# [Debug Check] 물타기 판단 상세 로그
 			logger.info(f"🔍 [물타기 정밀판독] {stk_cd}: 현재단계 {actual_current_step}차 | 현재수익 {pl_rt:.2f}% | 목표수익 {next_target_rate:.2f}% | 갭 {pl_rt - next_target_rate:.2f}%")
