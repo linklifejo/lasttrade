@@ -197,19 +197,33 @@ def get_all_settings():
 		return {}
 
 def save_all_settings(settings_dict):
-	"""모든 설정 일괄 저장 (DB & 파일 동시 저장됨)"""
+	"""모든 설정 일괄 저장 (DB 통합 트랜잭션 사용)"""
+	timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 	try:
 		# [Sync Fix] 키 동기화: 프론트엔드(stop_loss_rate)와 백엔드(sl_rate) 간 불일치 방지
 		if 'stop_loss_rate' in settings_dict:
 			settings_dict['sl_rate'] = settings_dict['stop_loss_rate']
-			logger.info(f"🔄 설정 키 동기화: stop_loss_rate({settings_dict['stop_loss_rate']}) -> sl_rate")
 		elif 'sl_rate' in settings_dict:
 			settings_dict['stop_loss_rate'] = settings_dict['sl_rate']
-			logger.info(f"🔄 설정 키 동기화: sl_rate({settings_dict['sl_rate']}) -> stop_loss_rate")
 
-		for key, value in settings_dict.items():
-			save_setting(key, value)
-		logger.info(f"설정 {len(settings_dict)}개 저장 완료")
+		with get_db_connection() as conn:
+			conn.execute("BEGIN TRANSACTION")
+			for key, value in settings_dict.items():
+				# JSON 직렬화
+				if isinstance(value, (dict, list)):
+					value_str = json.dumps(value, ensure_ascii=False)
+				elif isinstance(value, bool):
+					value_str = 'true' if value else 'false'
+				else:
+					value_str = str(value)
+				
+				conn.execute('''
+					INSERT OR REPLACE INTO settings (key, value, updated_at)
+					VALUES (?, ?, ?)
+				''', (key, value_str, timestamp))
+			conn.commit()
+			
+		logger.info(f"설정 {len(settings_dict)}개 일괄 저장 완료 (트랜잭션)")
 		return True
 	except Exception as e:
 		logger.error(f"일괄 설정 저장 실패: {e}")
