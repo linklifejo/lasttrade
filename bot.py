@@ -241,10 +241,10 @@ class MainApp:
 			# 현재 모드 확인
 			current_mode = get_current_api_mode()
 		
-			# [중요] 평일 체크 (토/일요일에는 전환하지 않음)
-			if not MarketHour._is_weekday():
-				return  # 주말에는 자동 전환 스킵
-			
+		# [중요] 거래일 체크 (주말 + 공휴일 제외)
+		if not MarketHour.is_trading_day():
+			return  # 휴장일에는 자동 전환 스킵
+		
 			# Mock → Real 전환 (장 시작)
 			if current_time == real_switch_time and current_mode == "Mock":
 				logger.info(f"🔄 [{real_switch_time}] 자동 전환: Mock → Real (실전 매매 시작)")
