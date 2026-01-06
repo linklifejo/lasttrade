@@ -520,31 +520,37 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# 현재 매입 비율
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
+		# 2. [물타기 단계 계산 - 수익률 기반 직관적 로직]
+		# 사용자 규칙: 신규 매수 후 설정된 간격(예: 4%)만큼 떨어질 때마다 다음 단계 진입
+		strategy_rate_val = float(get_setting('single_stock_rate', 4.0))
+		if strategy_rate_val <= 0: strategy_rate_val = 4.0
+		logger.info(f"[Debug] {stk_cd} 물타기 간격 설정값: {strategy_rate_val}%")
+
 		# [단계 판독 로직 정밀화 - LASTTRADE 수열 적용]
 		actual_current_step = 0
 		if alloc_per_stock > 0:
-			# [소액 계좌 보정] 할당액이 너무 적으면(예: 5만원 미만), 금액 기반 판독이 왜곡됨(1주만 사도 MAX).
-			# 따라서 소액일 때는 수익률 기반으로 단계를 추정하거나, 무조건 1단계씩 올라가도록 함.
+			# [소액 계좌 보정] 할당액이 너무 적으면(예: 5만원 미만), 금액 기반 판독이 왜곡됨.
 			if alloc_per_stock < 50000:
-				# 수익률 기반 역산 (-4% 당 1단계)
-				step_by_pl = int(abs(pl_rt) / 4.0) + 1 if pl_rt < 0 else 1
-				actual_current_step = step_by_pl
-				logger.info(f"[소액 보정] {stk_cd}: 할당액({alloc_per_stock:.0f}원) 과소 -> 수익률 기반 단계({actual_current_step}차) 적용")
+				# 수익률 기반은 문제(평단 하락=단계 후퇴)가 있으므로 매입금액 기반 수량 추정으로 변경
+				min_amt = float(get_setting('min_buy_amount', 2000))
+				if min_amt <= 0: min_amt = 2000
+				
+				# 예: 2000원 -> 1차, 2300원(2주) -> 2차 (올림 처리하여 싼 주식도 단계 인정)
+				import math
+				actual_current_step = int(math.ceil(cur_pchs_amt / min_amt))
+				if actual_current_step < 1: actual_current_step = 1
+				
+				logger.info(f"[소액 보정] {stk_cd}: 매입금({cur_pchs_amt:,.0f}원)/단위({min_amt}원) -> 물리적 단계({actual_current_step}차) 적용")
 			else:
 				for i, ratio in enumerate(cumulative_ratios):
-					# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
 					if cur_pchs_amt >= (alloc_per_stock * ratio * 0.98):
 						actual_current_step = i + 1
 		
 		# [Fix] UI 표시용 단계도 내부 로직(소액 보정 포함)과 일치시킴
 		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt
-		
-		# 2. [물타기 단계 계산 - 수익률 기반 직관적 로직]
-		# 사용자 규칙: 신규 매수 후 설정된 간격(예: 4%)만큼 떨어질 때마다 다음 단계 진입
-		# 사용자 규칙: 신규 매수 후 설정된 간격(예: 4%)만큼 떨어질 때마다 다음 단계 진입
-		strategy_rate_val = float(get_setting('single_stock_rate', 4.0))
-		logger.info(f"[Debug] {stk_cd} 물타기 간격 설정값: {strategy_rate_val}%") # [Debug Log]
-		if strategy_rate_val <= 0: strategy_rate_val = 4.0
+
+		# (아래 중복된 strategy_rate_val 정의 부분 제거 또는 유지 - 여기서는 위로 올렸으므로 아래는 주석처리하거나 놔둠)
+		# strategy_rate_val = float(get_setting('single_stock_rate', 4.0))  <-- 이미 위에서 읽음
 		
 		# 현재 수익률이 마이너스일 때만 계산
 		if pl_rt < 0:

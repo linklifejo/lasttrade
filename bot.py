@@ -642,9 +642,13 @@ class MainApp:
 					ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
 					a_step = 0
 					
-					# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 1차로 고정
+					# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용
 					if alloc_per_stock < 50000:
-						a_step = 1
+						min_amt = float(get_setting('min_buy_amount', 2000))
+						if min_amt <= 0: min_amt = 2000
+						import math
+						a_step = int(math.ceil(pur_amt / min_amt))
+						if a_step < 1: a_step = 1
 					else:
 						for i, th in enumerate(cumulative_ratios):
 							if ratio >= (th * 0.70): # [사용자 기준] 70%만 채워져도 해당 단계로 인정
