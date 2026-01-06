@@ -40,11 +40,27 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	
 	# [쿨타임 체크] 같은 종목을 너무 자주 매수하는 것을 방지
 	# [안정성 개선] 5초 -> 60초로 증가 (과도한 매수 방지)
+	# [수정] 이미 보유 중인 종목(물타기)은 쿨타임 무시 (긴급 대응)
+	is_held = False
+	if current_holdings:
+		for s in current_holdings:
+			c = s.get('stk_cd', '').replace('A', '')
+			if c == stk_cd:
+				qty = int(float(str(s.get('rmnd_qty', s.get('hold_qty', '0'))).replace(',', '')))
+				if qty > 0:
+					is_held = True
+					break
+	
 	buy_cooldown = 60 # 60초 (재진입 방지)
 	last_time = last_buy_times.get(stk_cd, 0)
-	if time.time() - last_time < buy_cooldown:
+	
+	# 보유 중이지 않은 신규 진입 종목만 쿨타임 적용
+	if not is_held and (time.time() - last_time < buy_cooldown):
 		logger.info(f"[매수 스킵] {stk_cd}: 매수 쿨타임 중 ({int(buy_cooldown - (time.time() - last_time))}초 남음)")
 		return False
+	elif is_held:
+		# logger.info(f"[쿨타임 무시] {stk_cd}: 보유 중(물타기)이므로 즉시 매수 가능")
+		pass
 
 	# [재매수 방지] 최근 매도한 종목은 일정 시간 동안 재매수 금지
 	# [안정성 개선] 30초 -> 60초로 증가 (API 반영 지연 대응)

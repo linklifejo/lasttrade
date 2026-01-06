@@ -460,9 +460,10 @@ class RealTimeSearch:
 			
 			for code, r_data in candidates_info:
 				# [Fix] 이미 보유 중인 종목은 신규 진입 대상에서 제외
+				# 단, 물타기(Watering)를 위해 check_n_buy로 진입은 허용해야 함
 				if code in self.purchased_stocks:
-					logger.info(f"[Selection Skip] {code}: 이미 보유 중이므로 대기열에서 제거")
-					continue
+					# logger.info(f"[Selection Pass] {code}: 이미 보유 중이나 물타기 체크를 위해 chk_n_buy 진입 허용")
+					pass
 
 				# 매수 진행 중 체크
 				if code in self.buying_stocks: continue
@@ -798,6 +799,15 @@ class RealTimeSearch:
 						rate = random.uniform(3.0, 7.0)
 						self.candidate_queue[code] = rate
 						logger.info(f'🎮 {code} ({rate:.1f}%) -> 매수 대기열 등록')
+
+				# [Test] 보유 종목도 매 루프마다 검사 (물타기 테스트용)
+				for p_code in list(self.purchased_stocks):
+					# 랜덤하게 가격 변동 주입 (-5 ~ +5%)
+					p_rate = random.uniform(-5.0, 5.0)
+					# 등락률보다는, 그냥 큐에 넣어주면 check_n_buy가 알아서 판단함
+					if p_code not in self.candidate_queue:
+						self.candidate_queue[p_code] = p_rate
+						# logger.info(f"🎮 [Self-Check] 보유종목 {p_code} 검증 큐 투입")
 				
 				if self.candidate_queue:
 					current_cnt = len(self.purchased_stocks)

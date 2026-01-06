@@ -4,6 +4,7 @@ import datetime
 import os
 import json
 import time
+import sys
 from config import telegram_token
 from chat_command import ChatCommand
 from single_instance import SingleInstance
@@ -26,10 +27,15 @@ from response_manager import response_manager
 
 class MainApp:
 	def __init__(self):
-		self.chat_command = ChatCommand()
+		# API 인스턴스 초기화 (토큰 발급 X)
+		self.chat_command = ChatCommand(self) # 나 자신을 넘겨줌 (상호참조)
 		
-
-			
+		# [Memory Flag] DB 지연/락 무시하고 즉시 제어하기 위한 메모리 플래그
+		self.is_running_memory = True
+		
+		# Telegram Bot은 ChatCommand 내부에서 초기화됨
+		
+		# 상태 관리 변수
 		self.market_open_notified = False
 		self.last_update_id = 0
 		self.telegram_url = f"https://api.telegram.org/bot{telegram_token}/getUpdates"
@@ -185,15 +191,27 @@ class MainApp:
 				logger.info(f"자동 시작 대기 중 - 장 시작 시 자동으로 연결됩니다.")
 				self.today_started = True # 메시지 중복 방지용
 		
-		# 2. 장 종료 처리 (매도 및 정지)
-		# [Fix] Mock(가상 서버) 모드일 때는 24시간 동작하므로 장 종료 자동 정지 스킵
-		is_mock = (get_current_api_mode() == "Mock")
+		# 2. 장 종료 처리 (자동 MOCK 전환)
+		# 실전/모의 장이 끝나면 자동으로 Mock 서버로 전환하여 24시간 가동 유지
+		current_mode = get_current_api_mode()
+		is_mock = (current_mode == "Mock")
+		
 		if not is_mock and MarketHour.is_market_end_time() and not self.today_stopped:
-			logger.info(f"장 종료 시간({MarketHour.MARKET_END_HOUR:02d}:{MarketHour.MARKET_END_MINUTE:02d})입니다. 자동으로 stop 명령을 실행합니다.")
-			await self.chat_command.stop(False)  # auto_start를 false로 설정하지 않음
-			logger.info("자동으로 계좌평가 보고서를 발송합니다.")
-			await self.chat_command.report()  # 장 종료 시 report도 자동 발송
-			self.today_stopped = True  # 오늘 stop 실행 완료 표시
+			logger.info(f"장 종료 시간({MarketHour.MARKET_END_HOUR:02d}:{MarketHour.MARKET_END_MINUTE:02d})입니다. MOCK 모드로 자동 전환합니다.")
+			
+			# [DB 설정 변경] Real/Paper -> Mock
+			from database_helpers import save_setting
+			save_setting('trading_mode', 'MOCK')
+			
+			# 봇에게 모드가 바뀌었음을 알림 (메인 루프가 감지하고 재초기화함)
+			logger.info("🔄 [Auto Switch] Trading Mode: REAL/PAPER -> MOCK")
+			
+			# 오늘 장 종료 처리는 완료된 것으로 표시 (중복 실행 방지)
+			self.today_stopped = True
+			
+			# (선택) 장 마감 리포트는 발송
+			logger.info("장 마감 계좌평가 보고서를 발송합니다.")
+			await self.chat_command.report()
 
 		# 3. [NEW] AI 학습 통합 처리 (Mock 포함 모든 모드 15:40에 실행)
 		if MarketHour.is_market_end_time() and not self.today_learned:
@@ -218,61 +236,7 @@ class MainApp:
 			except Exception as e:
 				logger.error(f"⚠️ AI 학습 오류: {e}")
 			
-			self.today_learned = True  # 학습 완료 표시
-		
-		# 4. [NEW] 시간 기반 자동 모드 전환 (Mock ↔ Real)
-		await self.check_auto_mode_switch()
-	
-	async def check_auto_mode_switch(self):
-		"""시간 기반 Mock ↔ Real 자동 전환"""
-		try:
-			# 설정 확인
-			auto_switch_enabled = get_setting('auto_mode_switch_enabled', True)  # 기본값: 활성화
-			if not auto_switch_enabled:
-				return
-			
-			now = datetime.datetime.now()
-			current_time = now.strftime('%H:%M')
-			
-			# 전환 시간 설정 (기본값)
-			real_switch_time = get_setting('real_mode_switch_time', '09:00')
-			mock_switch_time = get_setting('mock_mode_switch_time', '15:30')
-			
-			# 현재 모드 확인
-			current_mode = get_current_api_mode()
-		
-			# [중요] 거래일 체크 (주말 + 공휴일 제외)
-			if not MarketHour.is_trading_day():
-				return  # 휴장일에는 자동 전환 스킵
-		
-			# Mock → Real 전환 (장 시작)
-			if current_time == real_switch_time and current_mode == "Mock":
-				logger.info(f"🔄 [{real_switch_time}] 자동 전환: Mock → Real (실전 매매 시작)")
-				from database_helpers import save_setting
-				save_setting('use_mock_server', False)
-				save_setting('trading_mode', 'REAL')
-				
-				# API 어댑터 재설정 (즉시 반영)
-				from kiwoom_adapter import reset_api
-				reset_api()
-				
-				logger.info("✅ Real 서버로 전환 완료 - 실전 매매 활성화")
-			
-			# Real → Mock 전환 (장 마감 후)
-			elif current_time == mock_switch_time and current_mode != "Mock":
-				logger.info(f"🔄 [{mock_switch_time}] 자동 전환: Real → Mock (실전 종료)")
-				from database_helpers import save_setting
-				save_setting('use_mock_server', True)
-				save_setting('trading_mode', 'MOCK')
-				
-				# API 어댑터 재설정
-				from kiwoom_adapter import reset_api
-				reset_api()
-				
-				logger.info("✅ Mock 서버로 전환 완료 - 테스트 모드 복귀")
-		
-		except Exception as e:
-			logger.error(f"⚠️ 자동 모드 전환 오류: {e}")
+			self.today_learned = True # 오늘 학습 완료 표시
 
 	async def check_web_command(self):
 		"""웹 대시보드에서 보낸 명령을 확인하고 처리합니다. (DB 기반)"""
@@ -302,9 +266,6 @@ class MainApp:
 					from check_n_buy import reset_accumulation_global
 					reset_accumulation_global()
 					
-					from database_helpers import mark_web_command_completed
-					mark_web_command_completed(cmd_id) # 중요: 명령 처리 완료 마킹
-					
 					# [Immediate Refresh] 즉시 데이터 갱신하여 UI 반영
 					logger.info("🔄 [System] 데이터 즉시 갱신 중...")
 					loop = asyncio.get_running_loop()
@@ -318,23 +279,25 @@ class MainApp:
 					# 웹에서 리포트 요청 시 텔레그램 발송 없이 JSON만 업데이트
 					await self.chat_command.report(send_telegram=False)
 				else:
-					# 시작/종료 명령 시 즉시 로그 출력
-					from database_helpers import mark_web_command_completed, save_setting, set_bot_running
-					
+					# 시작/종료 명령 시 즉시 로그 출력 및 메모리 플래그 업데이트
 					if command == 'stop':
 						self.manual_stop = True
-						save_setting('auto_start', 'false')
-						set_bot_running(False)
-						logger.info("🛑 [Web Command] 봇을 일시정지(Paused) 합니다.")
+						self.is_running_memory = False # [Fix] 즉시 정지
+						logger.info("🛑 [Force Stop] 사용자 명령에 의해 봇 프로세스를 종료합니다.")
+						
+						# [Fix] 죽기 전에 명령 처리 완료 표시 (무한 재시작 방지)
+						from database_helpers import mark_web_command_completed
+						mark_web_command_completed(cmd_id)
+						
+						import sys
+						sys.exit(0) # [Kill] 확실한 종료를 위해 프로세스 종료
 					elif command == 'start':
 						self.manual_stop = False
-						save_setting('auto_start', 'true')
-						set_bot_running(True)
-						logger.info("🚀 [Web Command] 봇을 재개(Resumed) 합니다.")
+						self.is_running_memory = True  # [Fix] 즉시 시작
 						
-					# 공통 처리 완료 표시
-					mark_web_command_completed(cmd_id)
-					return # 직접 처리했으므로 process_command 호출 생략 (충돌 방지)
+					logger.info(f"⚙️ 명령 실행 중: {command}...")
+					await self.chat_command.process_command(command)
+					logger.info(f"✅ 명령 실행 완료: {command}")
 					
 				# 처리 완료 표시
 				mark_web_command_completed(cmd_id)
@@ -788,7 +751,7 @@ class MainApp:
 			"deposit": deposit,
 			"total_pl": final_pl,
 			"total_yield": (final_pl / final_buy * 100) if final_buy > 0 else 0,
-			"bot_running": (not self.manual_stop) and self.chat_command.rt_search.connected,
+			"bot_running": self.chat_command.rt_search.connected,
 			"initial_asset": self.chat_command.initial_asset or total_asset,
 			"api_mode": api_mode,
 			"is_paper": get_setting('is_paper_trading', True)
@@ -879,6 +842,9 @@ class MainApp:
 				# 장 시작/종료 시간 확인
 				await self.check_market_timing()
 				
+				# 루프 시작 시간
+				loop_start_time = time.time()
+
 				# [Token Auto-Renewal] 토큰 자동 갱신 (4시간마다 또는 날짜 변경 시)
 				try:
 					current_time = time.time()
@@ -895,107 +861,111 @@ class MainApp:
 							logger.info("✅ 토큰 갱신 완료")
 				except Exception as e:
 					logger.error(f"토큰 갱신 실패: {e}")
-
-				# [Throttling] 루프 속도 조절 (CPU 및 DB 지연 방지)
-				await asyncio.sleep(0.5)
-
-				# [Web Dashboard] 웹 대시보드에서 명령어 확인
-				# logger.debug("Checking web commands...")
+				
+				# [Web Dashboard] 웹 대시보드에서 명령어 확인 (2초마다)
+				# 멈춰 있어도 명령은 받아야 하므로 최상단에 위치
 				await self.check_web_command()
-
-				
-				# [Pause Check] 일시정지 상태 확인 (manual_stop 플래그 우선)
-				if self.manual_stop:
-					self._send_heartbeat()
-					await asyncio.sleep(1)
-					continue
-				
-				from database_helpers import get_bot_running
-				if not get_bot_running():
-					self._send_heartbeat()
-					await asyncio.sleep(1)
-					continue
 
 				# [Math] 분봉 캔들 및 대응 데이터(Response) 업데이트
 				await candle_manager.process_minute_candles()
 				await response_manager.update_metrics(self.chat_command.rt_search.current_prices)
 
+				# [Running Check] 봇 실행 상태 확인
+				# 명령 확인 후, 실행 중이 아니면 여기서 루프 건너뜀 (매매 로직 진입 방지)
+				from database_helpers import get_bot_running
+				
+				# [Fix] 메모리 플래그 우선 체크 (DB 락/지연 방지)
+				if not self.is_running_memory or not get_bot_running():
+					# 멈춤 상태면 대기
+					if int(time.time()) % 10 == 0:
+						logger.info("⏸ [PAUSED] 봇이 정지 상태입니다. (시작하려면 Start 버튼을 누르세요)")
+					await asyncio.sleep(1)
+					continue
+
 				
 				# [추가] 보유 종목 물타기/관리 및 모니터링 루프 (Dynamic Rate Limit)
 				# [Fix] 실전/모의투자 시 호출 제한 방지를 위해 간격 확대 (4.0 -> 8.0) -> [Revert] TS 반응성 위해 1.0초로 단축
 				# (보유 종목이 적을 때는 API 제한에 걸리지 않으므로 빠른 대응 우선)
-				limit_interval = 1.0
-				if time.time() - last_json_update > limit_interval:
+				try:
+					# [Refactoring] Helper Methods 호출
+					loop = asyncio.get_running_loop()
+					
+					# 1. 데이터 업데이트 (최우선 실행)
+					self._send_heartbeat() # 긴 작업 시작 전 신호
+					current_stocks, current_balance, balance_data = await self._update_market_data(loop)
+					self._send_heartbeat() # 작업 직후 신호
+					
+					# [Fix] 데이터가 정상적으로 전달되지 않았을 경우 이번 루프 스킵
+					if current_stocks is None or balance_data is None:
+						await asyncio.sleep(2)
+						continue
+						
+					deposit_amt = balance_data.get('deposit', 0)
+					
+					# [New] 미체결 데이터 조회 (chk_n_buy/chk_n_sell 중복 호출 방지)
+					from kiwoom_adapter import get_api
+					api = get_api()
+					out_orders = await loop.run_in_executor(None, api.get_outstanding_orders, self.chat_command.token)
 
+					# 2. 매도 로직 실행 (상태 데이터 주입)
+					await self.chat_command.run_sell_logic(current_stocks, deposit_amt, out_orders)
+					
+					# 3. 안전 감시 (상태 데이터 주입)
+					await self.chat_command.monitor_safety(deposit_amt, current_stocks)
+
+					# 4. 로직 실행 (유효 데이터 존재 시)
+					if current_stocks is not None:
+						# [Sync] 내부 추적 데이터(매입금액) 동기화
+						# sync_accumulated_amounts(current_stocks)
+						
+						# [Sync] 보유 시간 동기화 (재시작 시 타이머 자동 시작)
+						for s in current_stocks:
+							code = normalize_stock_code(s.get('stk_cd', ''))
+							if code and code not in self.held_since:
+								self.held_since[code] = time.time()
+						
+						# 물타기 (장중 매수 시간)
+						if MarketHour.is_market_buy_time():
+							self._send_heartbeat() # 매수 로직 진입 전
+							await self._process_watering_logic(current_stocks, balance_data, out_orders)
+							self._send_heartbeat() # 매수 로직 완료 후
+							
+						# GUI 상태 업데이트
+						last_json_update = await self._update_status_json(current_stocks, balance_data, current_balance)
+						
+					# [Dynamic Interval] TS 발동 종목이 있으면 초고속 감시 모드 전환
+					ts_active = False
 					try:
-						# [Time-Cut] 매도 로직 실행 전에 held_since 정보를 ChatCommand에 전달
-						# (매도 로직에서 시간컷 체크를 위해 필요)
-						self.chat_command.held_since = self.held_since
+						TS_ACTIVATION = 1.0 # 기본값
+						raw_val = float(str(get_setting('ts_activation_rate', '1.0')).strip())
+						if raw_val > 0: TS_ACTIVATION = raw_val
 						
-						# [Seq 1] 매도 로직 (순차 실행)
-						# 매도 체크를 가장 먼저 수행하여 현금 확보 및 포트폴리오 정리
-						# [Refactoring] Helper Methods 호출
-						loop = asyncio.get_running_loop()
-						
-						# 1. 데이터 업데이트 (최우선 실행)
-						self._send_heartbeat() # 긴 작업 시작 전 신호
-						current_stocks, current_balance, balance_data = await self._update_market_data(loop)
-						self._send_heartbeat() # 작업 직후 신호
-						
-						# [Fix] 데이터가 정상적으로 전달되지 않았을 경우 이번 루프 스킵
-						if current_stocks is None or balance_data is None:
-							await asyncio.sleep(2)
-							continue
-							
-						deposit_amt = balance_data.get('deposit', 0)
-						
-						# [New] 미체결 데이터 조회 (chk_n_buy/chk_n_sell 중복 호출 방지)
-						from kiwoom_adapter import get_api
-						api = get_api()
-						out_orders = await loop.run_in_executor(None, api.get_outstanding_orders, self.chat_command.token)
+						if current_stocks:
+							for stock in current_stocks:
+								# 현재가 기반 수익률 계산
+								if 'pl_rt' in stock:
+									try:
+										if float(stock['pl_rt']) >= TS_ACTIVATION:
+											ts_active = True
+											break
+									except: pass
+					except: pass
 
-						# 2. 매도 로직 실행 (상태 데이터 주입)
-						await self.chat_command.run_sell_logic(current_stocks, deposit_amt, out_orders)
-						
-						# 3. 안전 감시 (상태 데이터 주입)
-						await self.chat_command.monitor_safety(deposit_amt, current_stocks)
+					# [Loop Control]
+					# - TS 발동 시: 0.2초 (빠른 대응)
+					# - 일반 시: 1.0초 (시스템 부하 및 UI 반응성 확보)
+					wait_time = 0.2 if ts_active else 1.0
+					
+					elapsed = time.time() - loop_start_time
+					if elapsed < wait_time:
+						await asyncio.sleep(wait_time - elapsed)
+					else:
+						await asyncio.sleep(0.01) # 최소 대기
 
-						# 4. 로직 실행 (유효 데이터 존재 시)
-						if current_stocks is not None:
-							# [Sync] 내부 추적 데이터(매입금액) 동기화
-							# sync_accumulated_amounts(current_stocks)
-							
-							# [Sync] 보유 시간 동기화 (재시작 시 타이머 자동 시작)
-							for s in current_stocks:
-								code = normalize_stock_code(s.get('stk_cd', ''))
-								if code and code not in self.held_since:
-									self.held_since[code] = time.time()
-									logger.info(f"[Sync] {code} 보유 시간 추적 시작 (기존 보유 종목)")
-							
-							# 동기화
-							self.chat_command.rt_search.update_held_stocks(current_stocks)
-							await self._sync_holdings(current_stocks, balance_data)
-							
-							# [Fix] 위(Line 696)에서 이미 조회했으므로 기존 out_orders 재사용 (호출 제한 방지)
-							# out_orders = await loop.run_in_executor(None, api.get_outstanding_orders, self.chat_command.token)
-							
-							# 물타기 (장중 매수 시간)
-							if MarketHour.is_market_buy_time():
-								self._send_heartbeat() # 매수 로직 진입 전
-								await self._process_watering_logic(current_stocks, balance_data, out_orders)
-								self._send_heartbeat() # 매수 로직 완료 후
-								
-							# GUI 상태 업데이트
-							last_json_update = await self._update_status_json(current_stocks, balance_data, current_balance)
-							
-							# [Display] 보유 시간 (1분 간격)
-							if int(time.time()) % 60 < 2 and self.held_since:
-								logger.info(f"[보유시간 현황] {len(self.held_since)}개 종목 추적 중")
-
-					except Exception as e:
-						import traceback
-						logger.error(f"[MainLoop] 주기적 루프 오류:\n{traceback.format_exc()}")
-						await asyncio.sleep(5) # 오류 시 대기
+				except Exception as e:
+					import traceback
+					logger.error(f"[MainLoop] 주기적 루프 오류:\n{traceback.format_exc()}")
+					await asyncio.sleep(5) # 오류 시 대기
 						
 				# [Auto Mode Switcher] 시간에 따라 실전/Mock 모드 자동 전환
 				# 08:50 ~ 15:35 : 실전 모드 (Real)
@@ -1044,6 +1014,77 @@ class MainApp:
 					except Exception as e: pass
 					await asyncio.sleep(1)
 
+					# [긴급] 당일 청산(Liquidation) 시간 체크
+					try:
+						lq_time_str = get_setting('liquidation_time', '15:15')
+						now = datetime.datetime.now()
+						lq_hour, lq_min = map(int, lq_time_str.split(':'))
+						lq_time = now.replace(hour=lq_hour, minute=lq_min, second=0, microsecond=0)
+						
+						# 청산 시간 지났고, 아직 장 중(15:30 전)이라면
+						if now >= lq_time and now.time() < datetime.time(15, 30):
+							# 아직 청산 안 한 상태라면
+							if not getattr(self, 'is_liquidating', False):
+								self.is_liquidating = True
+								logger.warning(f"🚨 [Liquidation] 당일 청산 시간({lq_time_str}) 도달 -> 전량 매도 실행!")
+								
+								# 보유 종목 조회
+								my_stocks = api.get_my_stocks(self.chat_command.token)
+								if my_stocks:
+									for stock in my_stocks:
+										s_code = stock.get('stk_cd', '')
+										s_qty = stock.get('rmnd_qty', 0)
+										s_name = stock.get('stk_nm', '')
+										
+										if s_code and int(s_qty) > 0:
+											logger.warning(f"👋 [청산 매도] {s_name}({s_code}): {s_qty}주 시장가 매도")
+											# 시장가 매도 (01)
+											api.order_stock(s_code, '01', str(s_qty), '0', '00', self.chat_command.token)
+											time.sleep(0.2) # API 부하 방지
+									
+									logger.info("✅ [Liquidation] 전량 매도 주문 완료. 봇을 종료 대기 상태로 전환합니다.")
+									# 매도 후 더 이상 매수하면 안 되므로 today_stopped 처리 (또는 그냥 놔둬도 됨)
+								else:
+									logger.info("ℹ️ [Liquidation] 보유 종목이 없어 청산 절차를 종료합니다.")
+					except Exception as e:
+						logger.error(f"청산 로직 오류: {e}")
+
+				# --------------------------------------------------------------------------------
+				# [Sync] 유령 보유 종목 제거 (30초 주기)
+				# --------------------------------------------------------------------------------
+				if time.time() - getattr(self, 'last_holding_sync_time', 0) > 30:
+					self.last_holding_sync_time = time.time()
+					if self.chat_command and self.chat_command.token:
+						try:
+							from kiwoom_adapter import get_api
+							from database_helpers import get_db_connection
+							
+							api = get_api()
+							bal_res = api.get_account_balance(self.chat_command.token)
+							
+							if bal_res and 'output1' in bal_res:
+								# 1. API 실제 보유 목록
+								api_held_codes = set()
+								for item in bal_res['output1']:
+									c = item.get('pdno', '')
+									if c: api_held_codes.add(str(c).replace('A', ''))
+								
+								# 2. DB 보유 목록
+								conn = get_db_connection()
+								cur = conn.cursor()
+								cur.execute("SELECT stock_code FROM purchased_stocks")
+								db_rows = cur.fetchall()
+								
+								# 3. 비교 및 삭제
+								for row in db_rows:
+									db_code = row['stock_code']
+									if db_code not in api_held_codes:
+										logger.warning(f"👻 [Ghost Buster] 실제 잔고에 없는 유령 종목 발견 -> DB 삭제: {db_code}")
+										cur.execute("DELETE FROM purchased_stocks WHERE stock_code = ?", (db_code,))
+										conn.commit()
+								conn.close()
+						except Exception as e:
+							logger.error(f"[Sync] 잔고 동기화 오류: {e}")
 
 				# [Auto-Cancel] 미체결 매수 주문 자동 취소 (매도는 자동 취소 제외)
 				# [Throttle] 과도한 API 호출 방지 (20초에 한 번만 실행)
