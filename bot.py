@@ -218,7 +218,57 @@ class MainApp:
 			except Exception as e:
 				logger.error(f"⚠️ AI 학습 오류: {e}")
 			
-			self.today_learned = True # 오늘 학습 완료 표시
+			self.today_learned = True  # 학습 완료 표시
+		
+		# 4. [NEW] 시간 기반 자동 모드 전환 (Mock ↔ Real)
+		await self.check_auto_mode_switch()
+	
+	async def check_auto_mode_switch(self):
+		"""시간 기반 Mock ↔ Real 자동 전환"""
+		try:
+			# 설정 확인
+			auto_switch_enabled = get_setting('auto_mode_switch_enabled', True)  # 기본값: 활성화
+			if not auto_switch_enabled:
+				return
+			
+			now = datetime.datetime.now()
+			current_time = now.strftime('%H:%M')
+			
+			# 전환 시간 설정 (기본값)
+			real_switch_time = get_setting('real_mode_switch_time', '09:00')
+			mock_switch_time = get_setting('mock_mode_switch_time', '15:30')
+			
+			# 현재 모드 확인
+			current_mode = get_current_api_mode()
+			
+			# Mock → Real 전환 (장 시작)
+			if current_time == real_switch_time and current_mode == "Mock":
+				logger.info(f"🔄 [{real_switch_time}] 자동 전환: Mock → Real (실전 매매 시작)")
+				from database_helpers import save_setting
+				save_setting('use_mock_server', False)
+				save_setting('trading_mode', 'REAL')
+				
+				# API 어댑터 재설정 (즉시 반영)
+				from kiwoom_adapter import reset_api
+				reset_api()
+				
+				logger.info("✅ Real 서버로 전환 완료 - 실전 매매 활성화")
+			
+			# Real → Mock 전환 (장 마감 후)
+			elif current_time == mock_switch_time and current_mode != "Mock":
+				logger.info(f"🔄 [{mock_switch_time}] 자동 전환: Real → Mock (실전 종료)")
+				from database_helpers import save_setting
+				save_setting('use_mock_server', True)
+				save_setting('trading_mode', 'MOCK')
+				
+				# API 어댑터 재설정
+				from kiwoom_adapter import reset_api
+				reset_api()
+				
+				logger.info("✅ Mock 서버로 전환 완료 - 테스트 모드 복귀")
+		
+		except Exception as e:
+			logger.error(f"⚠️ 자동 모드 전환 오류: {e}")
 
 	async def check_web_command(self):
 		"""웹 대시보드에서 보낸 명령을 확인하고 처리합니다. (DB 기반)"""
@@ -262,14 +312,22 @@ class MainApp:
 					await self.chat_command.report(send_telegram=False)
 				else:
 					# 시작/종료 명령 시 즉시 로그 출력
+					from database_helpers import mark_web_command_completed, save_setting, set_bot_running
+					
 					if command == 'stop':
 						self.manual_stop = True
+						save_setting('auto_start', 'false')
+						set_bot_running(False)
+						logger.info("🛑 [Web Command] 봇을 일시정지(Paused) 합니다.")
 					elif command == 'start':
 						self.manual_stop = False
+						save_setting('auto_start', 'true')
+						set_bot_running(True)
+						logger.info("🚀 [Web Command] 봇을 재개(Resumed) 합니다.")
 						
-					logger.info(f"⚙️ 명령 실행 중: {command}...")
-					await self.chat_command.process_command(command)
-					logger.info(f"✅ 명령 실행 완료: {command}")
+					# 공통 처리 완료 표시
+					mark_web_command_completed(cmd_id)
+					return # 직접 처리했으므로 process_command 호출 생략 (충돌 방지)
 					
 				# 처리 완료 표시
 				mark_web_command_completed(cmd_id)
@@ -723,7 +781,7 @@ class MainApp:
 			"deposit": deposit,
 			"total_pl": final_pl,
 			"total_yield": (final_pl / final_buy * 100) if final_buy > 0 else 0,
-			"bot_running": self.chat_command.rt_search.connected,
+			"bot_running": (not self.manual_stop) and self.chat_command.rt_search.connected,
 			"initial_asset": self.chat_command.initial_asset or total_asset,
 			"api_mode": api_mode,
 			"is_paper": get_setting('is_paper_trading', True)
@@ -830,9 +888,26 @@ class MainApp:
 							logger.info("✅ 토큰 갱신 완료")
 				except Exception as e:
 					logger.error(f"토큰 갱신 실패: {e}")
-				
-				# [Web Dashboard] 웹 대시보드에서 명령어 확인 (2초마다)
+
+				# [Throttling] 루프 속도 조절 (CPU 및 DB 지연 방지)
+				await asyncio.sleep(0.5)
+
+				# [Web Dashboard] 웹 대시보드에서 명령어 확인
+				# logger.debug("Checking web commands...")
 				await self.check_web_command()
+
+				
+				# [Pause Check] 일시정지 상태 확인 (manual_stop 플래그 우선)
+				if self.manual_stop:
+					self._send_heartbeat()
+					await asyncio.sleep(1)
+					continue
+				
+				from database_helpers import get_bot_running
+				if not get_bot_running():
+					self._send_heartbeat()
+					await asyncio.sleep(1)
+					continue
 
 				# [Math] 분봉 캔들 및 대응 데이터(Response) 업데이트
 				await candle_manager.process_minute_candles()
