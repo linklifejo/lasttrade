@@ -184,8 +184,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# 대원칙: 물타기 중에는 버티되, MAX 도달 시에는 확실하게 자른다.
 			if not should_sell and single_strategy == "WATER":
 				if is_max_bought:
-					# [MAX 손절] 사용자가 정의한 로직: 평단(-2%) + SL(-1%) = -3% 이탈 시 매도
-					MAX_SL_TARGET = -3.0
+					# [MAX 손절] 마틴게일 방어선(-2%) + 사용자 설정 손절선(SL_RATE, 음수)
+					# 예: SL_RATE가 -1%이면 -> -2% + (-1%) = -3%
+					MAX_SL_TARGET = -2.0 + SL_RATE
 					
 					if pl_rt <= MAX_SL_TARGET:
 						should_sell = True
