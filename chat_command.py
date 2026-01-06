@@ -933,6 +933,9 @@ class ChatCommand:
 					return # API 오류 무시
 				
 				# 3-1. 글로벌 손실 제한
+				# [Fix] Mock 모드에서는 손실 한도로 인한 자동 종료 방지 (테스트 목적)
+				is_mock = get_setting('use_mock_server', False)
+				
 				global_loss_limit = float(get_setting('global_loss_rate', -99.0))
 				
 				# 매수 직후 60초간 예외 처리
@@ -946,7 +949,7 @@ class ChatCommand:
 				if is_buying_recent:
 					global_loss_limit = -999.0
 
-				if profit_rate <= global_loss_limit:
+				if not is_mock and profit_rate <= global_loss_limit:
 					logger.warning(f"📉 [LASTTRADE] 일일 손실 한도 초과 감지! ({profit_rate:.2f}% <= {global_loss_limit}%)")
 					tel_send(f"📉 [LASTTRADE] 일일 손실 한도({global_loss_limit}%)에 도달하여 전량 매도 및 종료합니다.")
 					await self.sellall()

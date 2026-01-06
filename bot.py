@@ -641,10 +641,15 @@ class MainApp:
 					# 금액 기반 단계 (기전 로직 보강)
 					ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
 					a_step = 0
-					for i, th in enumerate(cumulative_ratios):
-						if ratio >= (th * 0.70): # [사용자 기준] 70%만 채워져도 해당 단계로 인정
-							a_step = i + 1
-						else: break
+					
+					# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 1차로 고정
+					if alloc_per_stock < 50000:
+						a_step = 1
+					else:
+						for i, th in enumerate(cumulative_ratios):
+							if ratio >= (th * 0.70): # [사용자 기준] 70%만 채워져도 해당 단계로 인정
+								a_step = i + 1
+							else: break
 					
 					# 최종 단계 = 수익률 기준(f_step)과 금액 기준(a_step) 중 큰 것 + 기본 진입(1)
 					# 신규 진입 시 0이 아니라 1부터 시작하도록 보정
@@ -831,8 +836,9 @@ class MainApp:
 
 				
 				# [추가] 보유 종목 물타기/관리 및 모니터링 루프 (Dynamic Rate Limit)
-				# [Fix] 실전/모의투자 시 호출 제한 방지를 위해 간격 확대 (4.0 -> 8.0)
-				limit_interval = 1.0 if current_api_mode == "Mock" else 8.0
+				# [Fix] 실전/모의투자 시 호출 제한 방지를 위해 간격 확대 (4.0 -> 8.0) -> [Revert] TS 반응성 위해 1.0초로 단축
+				# (보유 종목이 적을 때는 API 제한에 걸리지 않으므로 빠른 대응 우선)
+				limit_interval = 1.0
 				if time.time() - last_json_update > limit_interval:
 
 					try:

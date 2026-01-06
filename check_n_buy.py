@@ -130,37 +130,57 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		logger.error(f"[매수 체크] 보유종목 조회 오류: {e}")
 		return False
 	
-	# [API 오류 방어] API가 잔고를 못 가져왔을 때 DB 기록 확인하여 중복 매수 방지
-	if current_holding is None:
-		try:
-			from database_helpers import get_db_connection
-			import datetime
-			today_str = datetime.date.today().strftime('%Y-%m-%d')
-			with get_db_connection() as conn:
-				# 오늘 매수 총합
-				row_buy = conn.execute("SELECT SUM(qty) FROM trades WHERE code=? AND type='buy' AND timestamp LIKE ?", (stk_cd, f"{today_str}%")).fetchone()
-				qty_buy = row_buy[0] if row_buy and row_buy[0] else 0
-				
-				# 오늘 매도 총합
-				row_sell = conn.execute("SELECT SUM(qty) FROM trades WHERE code=? AND type='sell' AND timestamp LIKE ?", (stk_cd, f"{today_str}%")).fetchone()
-				qty_sell = row_sell[0] if row_sell and row_sell[0] else 0
-				
-				net_qty = qty_buy - qty_sell
-				
-				if net_qty > 0:
-					logger.warning(f"[잔고 방어] {stk_cd}: API 잔고엔 없으나 DB상 오늘 {net_qty}주 순매수 기록 있음 -> 보유 중으로 간주")
-					# 가짜 holding 객체 생성 (수익률 0 -> 추가 매수 안 함)
-					current_holding = {
-						'stk_cd': stk_cd,
-						'stk_nm': stk_cd,
-						'rmnd_qty': net_qty,
-						'pl_rt': 0.0, 
-						'cur_prc': 0,
-						'pchs_avg_pric': 0,
-						'evlu_amt': 0
-					}
-		except Exception as e:
-			logger.error(f"[DB 잔고 체크 실패] {e}")
+	# [API 오류 방어] API 잔고 외에 DB상 오늘 매수 후 보유 중인 종목도 합산하여 카운트 (Double Buy 방지)
+	# current_holdings(API) + DB(Today Net Buy > 0)
+	api_held_codes = set()
+	if current_holdings:
+		for stock in current_holdings:
+			api_held_codes.add(normalize_stock_code(stock['stk_cd']))
+	
+	try:
+		from database_helpers import get_db_connection
+		import datetime
+		today_str = datetime.date.today().strftime('%Y-%m-%d')
+		
+		# DB에서 오늘 순매수(매수-매도 > 0)인 종목들 조회
+		# (단, API 잔고에 이미 있는 건 제외)
+		with get_db_connection() as conn:
+			rows = conn.execute(
+				"SELECT code, type, qty FROM trades WHERE timestamp LIKE ?", 
+				(f"{today_str}%",)
+			).fetchall()
+			
+			db_calc_holdings = {}
+			for r in rows:
+				c, t, q = r['code'], r['type'], r['qty']
+				if c not in db_calc_holdings: db_calc_holdings[c] = 0
+				if t == 'buy': db_calc_holdings[c] += q
+				elif t == 'sell': db_calc_holdings[c] -= q
+			
+			# 순보유량이 양수인 종목 중 API 잔고에 없는 것 발견 시 추가
+			for c, qty in db_calc_holdings.items():
+				if qty > 0 and c not in api_held_codes:
+					logger.warning(f"[Deep Count] API엔 없으나 DB상 보유 중: {c} ({qty}주) -> 카운트 포함")
+					api_held_codes.add(c)
+					
+					# 만약 현재 매수하려는 종목이 여기에 해당하면 current_holding 복구
+					if c == stk_cd and current_holding is None:
+						current_holding = {
+							'stk_cd': stk_cd,
+							'stk_nm': stk_cd,
+							'rmnd_qty': qty,
+							'pl_rt': 0.0, 
+							'cur_prc': 0,
+							'pchs_avg_pric': 0,
+							'evlu_amt': 0
+						}
+						logger.info(f"[Deep Count] {stk_cd}: DB 데이터로 보유 상태 복구 완료")
+
+	except Exception as e:
+		logger.error(f"[Deep Count 실패] {e}")
+
+	# 최종 보유 종목 수 업데이트
+	my_stocks_count = len(api_held_codes)
 
 	# [Memory Cache 방어] API와 DB 모두 실패해도, 봇 실행 중 매수했던 기록이 있으면 차단
 
@@ -192,7 +212,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	if current_holding is None:
 		# 이미 목표 종목 수에 도달했으면 신규 매수 금지
 		if my_stocks_count >= int(target_cnt):
-			logger.warning(f"[종목수 제한] {stk_cd}: 현재 {my_stocks_count}개 보유 중 (목표: {int(target_cnt)}개) - 신규 매수 불가")
+			logger.warning(f"[종목수 제한] {stk_cd}: 현재 {my_stocks_count}개 보유 중 (목표: {int(target_cnt)}개) - 신규 매수 불가 (Deep Count)")
 			return False
 		logger.info(f"[신규 매수 가능] {stk_cd}: 현재 {my_stocks_count}개 보유 중 (목표: {int(target_cnt)}개)")
 		
@@ -503,12 +523,20 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# [단계 판독 로직 정밀화 - LASTTRADE 수열 적용]
 		actual_current_step = 0
 		if alloc_per_stock > 0:
-			for i, ratio in enumerate(cumulative_ratios):
-				# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
-				if cur_pchs_amt >= (alloc_per_stock * ratio * 0.98):
-					actual_current_step = i + 1
+			# [소액 계좌 보정] 할당액이 너무 적으면(예: 5만원 미만), 금액 기반 판독이 왜곡됨(1주만 사도 MAX).
+			# 따라서 소액일 때는 수익률 기반으로 단계를 추정하거나, 무조건 1단계씩 올라가도록 함.
+			if alloc_per_stock < 50000:
+				# 수익률 기반 역산 (-4% 당 1단계)
+				step_by_pl = int(abs(pl_rt) / 4.0) + 1 if pl_rt < 0 else 1
+				actual_current_step = step_by_pl
+				logger.info(f"[소액 보정] {stk_cd}: 할당액({alloc_per_stock:.0f}원) 과소 -> 수익률 기반 단계({actual_current_step}차) 적용")
+			else:
+				for i, ratio in enumerate(cumulative_ratios):
+					# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
+					if cur_pchs_amt >= (alloc_per_stock * ratio * 0.98):
+						actual_current_step = i + 1
 		
-		# UI 표시용 단계 (최대 split_cnt로 제한)
+		# [Fix] UI 표시용 단계도 내부 로직(소액 보정 포함)과 일치시킴
 		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt
 		
 		# 2. [물타기 단계 계산 - 수익률 기반 직관적 로직]
@@ -561,9 +589,12 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			# 현재 단계에 따른 다음 목표 수익률 (예: 1단계 보유 중이면 -4%가 되어야 2단계 진입)
 			next_target_rate = -1.0 * strategy_rate_val * actual_current_step
 			
+			# [Debug Check] 물타기 판단 상세 로그
+			logger.info(f"🔍 [물타기 정밀판독] {stk_cd}: 현재단계 {actual_current_step}차 | 현재수익 {pl_rt:.2f}% | 목표수익 {next_target_rate:.2f}% | 갭 {pl_rt - next_target_rate:.2f}%")
+
 			# 여유폭(buffer) 0.1% 감안
 			if pl_rt > (next_target_rate + 0.1):
-				logger.info(f"[물타기 방어] {stk_cd}: 현재 {pl_rt}% > 목표 {next_target_rate}% (단계:{actual_current_step}) -> 추가 매수 금지")
+				# logger.info(f"[물타기 방어] {stk_cd}: 현재 {pl_rt}% > 목표 {next_target_rate}% (단계:{actual_current_step}) -> 추가 매수 금지")
 				return False
 				
 		# 3. 추가 매수 결정

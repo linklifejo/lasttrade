@@ -126,7 +126,14 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			
 			# [수정] 비중 90% 이상이면 MAX로 간주 (1:1:2:2:4 수열 5단계까지 거의 다 찼음을 의미)
 			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-			is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.90)
+			
+			# [Critical Fix] UI상 5차(MAX)로 표기되면 내부적으로도 반드시 MAX로 인식해야 함
+			# Ratio가 0.71이어도 단계가 5차면 MAX 손절 로직 발동
+			# [소액 보정] 할당액이 5만원 미만이면 Ratio 대신 순수 단계(cur_step)만 신뢰
+			if alloc_per_stock < 50000:
+				is_max_bought = (cur_step >= split_buy_cnt)
+			else:
+				is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.90)
 
 			# [Time-Cut 로직]
 			if held_since and stock_code in held_since:
@@ -242,7 +249,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					time.sleep(0.5)
 					
 				# [매도 API 호출]
-				return_code, return_msg = sell_stock(stock_code, stock['rmnd_qty'], token=token)
+				# [Fix] 종목코드 A 제거 재확인 (API 호환성)
+				final_code = stock_code.replace('A', '')
+				return_code, return_msg = sell_stock(final_code, stock['rmnd_qty'], token=token)
 				
 				# 성공 확인 (Real=0, Mock=SUCCESS)
 				if str(return_code) not in ['0', 'SUCCESS']:
