@@ -18,13 +18,21 @@ get_balance = fn_kt00001
 def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, outstanding_orders=None):
 
 	# [설정 로드]
-	TP_RATE = cached_setting('take_profit_rate', 10.0)
-	SL_RATE = cached_setting('stop_loss_rate', -1.0)
+	try: TP_RATE = float(cached_setting('take_profit_rate', 10.0))
+	except: TP_RATE = 10.0
+	
+	try: SL_RATE = float(cached_setting('stop_loss_rate', -1.0))
+	except: SL_RATE = -1.0
 	
 	# 트레일링 스탑
-	USE_TRAILING = cached_setting('use_trailing_stop', True)
-	TS_ACTIVATION = cached_setting('trailing_stop_activation_rate', 1.5)
-	TS_CALLBACK = cached_setting('trailing_stop_callback_rate', 0.5)
+	try: USE_TRAILING = cached_setting('use_trailing_stop', True) # bool or str
+	except: USE_TRAILING = True
+	
+	try: TS_ACTIVATION = float(cached_setting('trailing_stop_activation_rate', 1.5))
+	except: TS_ACTIVATION = 1.5
+	
+	try: TS_CALLBACK = float(cached_setting('trailing_stop_callback_rate', 0.5))
+	except: TS_CALLBACK = 0.5
 	
 	# 일반 설정
 	target_cnt = float(cached_setting('target_stock_count', 1))
