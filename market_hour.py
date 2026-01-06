@@ -54,60 +54,27 @@ class MarketHour:
 	
 	@staticmethod
 	def _is_holiday():
-		"""한국 공휴일인지 확인합니다."""
-		now = datetime.datetime.now()
-		current_date = now.strftime('%Y-%m-%d')
-		current_year = now.year
-		
-		# 2026년 한국 공휴일 리스트 (매년 업데이트 필요)
-		holidays_2026 = [
-			'2026-01-01',  # 신정
-			'2026-01-28', '2026-01-29', '2026-01-30',  # 설날 연휴
-			'2026-03-01',  # 삼일절
-			'2026-05-05',  # 어린이날
-			'2026-05-24',  # 부처님오신날 (음력 4월 8일, 양력 변동)
-			'2026-06-06',  # 현충일
-			'2026-08-15',  # 광복절
-			'2026-10-03',  # 개천절
-			'2026-10-05', '2026-10-06', '2026-10-07',  # 추석 연휴
-			'2026-10-09',  # 한글날
-			'2026-12-25',  # 크리스마스
-		]
-		
-		# 2027년 공휴일 (미리 준비)
-		holidays_2027 = [
-			'2027-01-01',  # 신정
-			'2027-02-16', '2027-02-17', '2027-02-18',  # 설날 연휴 (예상)
-			'2027-03-01',  # 삼일절
-			'2027-05-05',  # 어린이날
-			'2027-05-13',  # 부처님오신날 (예상)
-			'2027-06-06',  # 현충일
-			'2027-08-15',  # 광복절
-			'2027-09-25', '2027-09-26', '2027-09-27',  # 추석 연휴 (예상)
-			'2027-10-03',  # 개천절
-			'2027-10-09',  # 한글날
-			'2027-12-25',  # 크리스마스
-		]
-		
-		# 연도별 공휴일 선택
-		if current_year == 2026:
-			holidays = holidays_2026
-		elif current_year == 2027:
-			holidays = holidays_2027
-		else:
-			# 기본 고정 공휴일만 체크
-			holidays = [
-				f'{current_year}-01-01',  # 신정
-				f'{current_year}-03-01',  # 삼일절
-				f'{current_year}-05-05',  # 어린이날
-				f'{current_year}-06-06',  # 현충일
-				f'{current_year}-08-15',  # 광복절
-				f'{current_year}-10-03',  # 개천절
-				f'{current_year}-10-09',  # 한글날
-				f'{current_year}-12-25',  # 크리스마스
+		"""한국 공휴일인지 확인합니다 (holidays 라이브러리 사용)."""
+		try:
+			import holidays
+			now = datetime.datetime.now()
+			
+			# 한국 공휴일 달력 로드
+			kr_holidays = holidays.KR()
+			
+			# 오늘 날짜가 공휴일 목록에 있는지 확인
+			return now in kr_holidays
+		except ImportError:
+			# 라이브러리 없는 경우 수동 리스트 fallback (최소한의 안전장치)
+			# (이미 설치했으므로 여기로 빠질 일은 거의 없음)
+			now = datetime.datetime.now()
+			current_date = now.strftime('%Y-%m-%d')
+			holidays_manual = [
+				f'{now.year}-01-01', f'{now.year}-03-01', f'{now.year}-05-05', 
+				f'{now.year}-06-06', f'{now.year}-08-15', f'{now.year}-10-03', 
+				f'{now.year}-10-09', f'{now.year}-12-25'
 			]
-		
-		return current_date in holidays
+			return current_date in holidays_manual
 	
 	@staticmethod
 	def is_trading_day():
