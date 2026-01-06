@@ -10,6 +10,9 @@ from database import log_trade_sync, update_high_price_sync, get_high_price_sync
 from utils import normalize_stock_code
 import check_n_buy
 
+# [Safety] 모듈 로드 시간 기록 (재시작 직후 매도 방지용)
+MODULE_LOAD_TIME = time.time()
+
 # Aliases for compatibility
 get_my_stocks = fn_kt00004
 sell_stock = fn_kt10001
@@ -96,6 +99,12 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 
 			logger.info(f"[CheckSell] {stock_code} ({stock_name}): {elapsed_str}PL={pl_rt}%, Strategy={single_strategy}, SL={SL_RATE}%")
 			
+			# [Safety] 재시작 직후 안전장치 (Smart Warm-up)
+			# 수익률이 -20%보다 좋으면(-10% 등) 60초간 매도 유예 (물타기 기회 부여)
+			# 단, 이미 -20% 이하로 폭락 중이면 즉시 매도 허용
+			if (time.time() - MODULE_LOAD_TIME < 60) and (pl_rt > -20.0):
+				continue
+
 			# [Time-Cut 설정]
 			TIME_CUT_MINUTES = cached_setting('time_cut_minutes', 30)
 			TIME_CUT_PROFIT = float(cached_setting('time_cut_profit', 1.0))
@@ -112,10 +121,11 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				except: pchs_amt = 0
 
 			# [단계 추정 정밀화 - LASTTRADE 수열 적용]
-			# 1:1:2:2:4... 방식의 누적 비중 리스트 생성
+			# 1:1:2:4:8... 방식의 누적 비중 리스트 생성 (check_n_buy와 동일)
 			weights = []
 			for i in range(split_buy_cnt):
-				weights.append(2**(i // 2))
+				if i == 0: weights.append(1)
+				else: weights.append(2**(i - 1))
 			total_weight = sum(weights)
 			
 			cumulative_ratios = []
@@ -143,16 +153,10 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						if pchs_amt >= (alloc_per_stock * ratio * 0.98):
 							cur_step = i + 1
 			
-			# [수정] 비중 90% 이상이면 MAX로 간주 (1:1:2:2:4 수열 5단계까지 거의 다 찼음을 의미)
-			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-			
-			# [Critical Fix] UI상 5차(MAX)로 표기되면 내부적으로도 반드시 MAX로 인식해야 함
-			# Ratio가 0.71이어도 단계가 5차면 MAX 손절 로직 발동
-			# [소액 보정] 할당액이 5만원 미만이면 Ratio 대신 순수 단계(cur_step)만 신뢰
-			if alloc_per_stock < 50000:
-				is_max_bought = (cur_step >= split_buy_cnt)
-			else:
-				is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.90)
+			# [수정] 비중 90% 조건 삭제 (마틴게일 4차/5차 구분 명확화 필요)
+			# 4차(50%)와 5차(100%) 차이가 크므로, 섣불리 금액 비율로 MAX 판정하면 안 됨.
+			# 오직 계산된 단계(cur_step)가 5차 이상일 때만 MAX로 인정.
+			is_max_bought = (cur_step >= split_buy_cnt)
 
 			# [Time-Cut 로직]
 			if held_since and stock_code in held_since:

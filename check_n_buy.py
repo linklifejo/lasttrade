@@ -563,13 +563,27 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# (아래 중복된 strategy_rate_val 정의 부분 제거 또는 유지 - 여기서는 위로 올렸으므로 아래는 주석처리하거나 놔둠)
 		# strategy_rate_val = float(get_setting('single_stock_rate', 4.0))  <-- 이미 위에서 읽음
 		
-		# 현재 수익률이 마이너스일 때만 계산
-		if pl_rt < 0:
-			# 예: -4.5% / 4% = 1.125 -> 1 (즉, 1단계 추가 -> 2차 매수)
-			# 예: -9.0% / 4% = 2.25 -> 2 (즉, 2단계 추가 -> 3차 매수)
-			target_step_by_amt = int(abs(pl_rt) / strategy_rate_val)
+		# [Critical Fix] 물타기 목표 단계 계산 로직 변경 (절대 수익률 -> 상대적 단계 상승)
+		# 기존: 총수익률 -12%여야 4차 진입 (평단 낮아지면 진입 불가 오류)
+		# 수정: 현재 수익률이 -4%(strategy_rate_val) 이하기만 하면 '현재 단계 + 1'을 목표로 설정
+		
+		# 일단 목표를 현재 단계로 초기화
+		target_step_index = actual_current_step # 1차 -> index 1 (2차 목표)
+		
+		# 현재 수익률이 기준선(예: -4%) 이하면 다음 단계 진입 허용
+		if pl_rt <= (-1.0 * strategy_rate_val):
+			# 예: 현재 3차, 수익률 -4.5% -> 목표 4차
+			target_step_index = actual_current_step
+			# 단, 이미 MAX(5차)면 더 못 감
+			if target_step_index >= split_cnt:
+				target_step_index = split_cnt - 1
 		else:
-			target_step_by_amt = 0
+			# 수익률이 -4%보다 좋으면(예: -2%), 추가 매수 불필요 -> 목표를 현재 단계보다 낮게 잡거나 유지
+			# 여기서는 '매수 안 함'을 유도하기 위해 -1 처리
+			target_step_index = actual_current_step - 1
+
+		# 변수명 호환성 유지 (target_step_by_amt는 index 개념)
+		target_step_by_amt = target_step_index
 			
 		# 더미 변수 설정 (로깅용)
 		current_loss_amt = 0
@@ -578,25 +592,17 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# [FIRE 전략 보강] 수익 발생 시 불타기 단계 계산
 		if single_strategy == 'FIRE' and pl_rt > 0:
 			# FIRE 전략은 '추가매수간격(예: 4%)' 상승 시마다 불타기 수행
-			# 예: 4% 상승 -> 2단계 진입, 8% 상승 -> 3단계 진입
 			fire_interval = float(get_setting('additional_buy_interval', 4.0)) # 기본 4%
 			if fire_interval <= 0: fire_interval = 4.0
 			
-			# 현재 수익률이 간격의 몇 배인지 계산 (예: 4.5% / 4% = 1.1 -> 1단계 추가)
-			# 1차 매수(기본) 상태에서 +4%가 되면 2차 매수(1단계 추가)를 해야 함
+			# 현재 수익률이 간격의 몇 배인지 계산
 			additional_step = int(pl_rt / fire_interval)
-			
-			# 불타기 목표 단계 = 현재 1차(0) + 추가 단계
-			# 예: 4% 상승 시 -> 1단계 추가 -> 목표 2차(index 1)
-			# 예: 8% 상승 시 -> 2단계 추가 -> 목표 3차(index 2)
 			target_step_fire = additional_step
 			
-			# 손실 기반 단계(target_step_by_amt) 대신 수익 기반 단계 사용
-			# 단, 현재 실제 단계보다 높을 때만 의미 있음
+			# 불타기 목표 단계 설정
 			target_step_by_amt = target_step_fire
 			logger.info(f"🔥 [FIRE 분석] 수익률 {pl_rt}% (간격 {fire_interval}%) -> 불타기 목표: {target_step_by_amt+1}차")
 
-						
 		if target_step_by_amt >= split_cnt: target_step_by_amt = split_cnt - 1
 		
 		# [Critical Fix] 수익률 기반 강력 방어 (금액 로직 무시)
