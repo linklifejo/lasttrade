@@ -119,10 +119,21 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# 실제 투입 금액 기반 단계 판정
 			cur_step = 1
 			if alloc_per_stock > 0:
-				for i, ratio in enumerate(cumulative_ratios):
-					# 현재 매입금이 해당 단계 비중의 90% 이상이면 그 단계로 인정
-					if pchs_amt >= (alloc_per_stock * ratio * 0.98):
-						cur_step = i + 1
+				# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용
+				if alloc_per_stock < 50000:
+					min_val = cached_setting('min_buy_amount', 2000)
+					try: min_amt = float(min_val)
+					except: min_amt = 2000
+					if min_amt <= 0: min_amt = 2000
+					
+					import math
+					cur_step = int(math.ceil(pchs_amt / min_amt))
+					if cur_step < 1: cur_step = 1
+				else:
+					for i, ratio in enumerate(cumulative_ratios):
+						# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
+						if pchs_amt >= (alloc_per_stock * ratio * 0.98):
+							cur_step = i + 1
 			
 			# [수정] 비중 90% 이상이면 MAX로 간주 (1:1:2:2:4 수열 5단계까지 거의 다 찼음을 의미)
 			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
