@@ -703,21 +703,27 @@ class MainApp:
 						elif 'FIRE' in st_strategy and pl_rt >= strategy_rate_val:
 							f_step = int(pl_rt / strategy_rate_val)
 					
-					# 금액 기반 단계 (기전 로직 보강)
-					ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-					a_step = 0
+					# [수량 기반 단계 추정] (소액 계좌 및 1:1:2:4:8 전략에 최적화)
+					# 1차: 1주 (기본)
+					# 2차: 2주 (1+1)
+					# 3차: 4주 (1+1+2)
+					# 4차: 8주 (1+1+2+4)
+					# 5차: 16주 (1+1+2+4+8)
 					
-					# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용
-					if alloc_per_stock < 50000:
-						min_amt = float(get_setting('min_buy_amount', 2000))
-						if min_amt <= 0: min_amt = 2000
-						import math
-						a_step = int(math.ceil(pur_amt / min_amt))
-						if a_step < 1: a_step = 1
-					else:
+					ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+					
+					if qty <= 1: a_step = 1
+					elif qty <= 2: a_step = 2
+					elif qty <= 4: a_step = 3
+					elif qty <= 8: a_step = 4
+					else: a_step = 5
+					
+					# 예외: 만약 사용자 할당금이 아주 커서 1차 매수가 10주라면?
+					# 그때는 비율 로직을 보조로 사용 (대체 로직)
+					if alloc_per_stock > 200000: # 종목당 20만원 이상 할당 시에만 비율 로직 체크
 						for i, th in enumerate(cumulative_ratios):
-							if ratio >= (th * 0.70): # [사용자 기준] 70%만 채워져도 해당 단계로 인정
-								a_step = i + 1
+							if ratio >= (th * 0.85): 
+								a_step = max(a_step, i + 1)
 							else: break
 					
 					# 최종 단계 = 수익률 기준(f_step)과 금액 기준(a_step) 중 큰 것 + 기본 진입(1)
