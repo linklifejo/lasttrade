@@ -820,9 +820,12 @@ class ChatCommand:
 		
 		try:
 			# [Fix] Sequential/Injected data to avoid redundant API calls
+			# [Realtime] Pass real-time prices for instant update
+			current_prices = getattr(self.rt_search, 'current_prices', {})
+			
 			loop = asyncio.get_running_loop()
 			success, sold_stocks, holdings_codes, sell_reasons = await loop.run_in_executor(
-				None, chk_n_sell, self.token, self.held_since, my_stocks, deposit_amt, outstanding_orders
+				None, chk_n_sell, self.token, self.held_since, my_stocks, deposit_amt, outstanding_orders, current_prices
 			)
 			
 			if success and sold_stocks:

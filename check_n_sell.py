@@ -18,7 +18,7 @@ get_my_stocks = fn_kt00004
 sell_stock = fn_kt10001
 get_balance = fn_kt00001
 
-def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, outstanding_orders=None):
+def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, outstanding_orders=None, realtime_prices=None):
 
 	# [설정 로드]
 	try: TP_RATE = float(cached_setting('take_profit_rate', 10.0))
@@ -55,7 +55,31 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 		if not my_stocks:
 			logger.info(f"[CheckSell] 보유 종목 없음 (Token: {str(token)[:10]}...)")
 			return True, [], [], {}
-			
+		
+		# [Realtime Price Injection] 실시간 시세로 보유종목 정보 갱신
+		if realtime_prices:
+			for stock in my_stocks:
+				code = normalize_stock_code(stock['stk_cd']).replace('A', '')
+				if code in realtime_prices and realtime_prices[code] > 0:
+					old_prc = int(stock.get('cur_prc', 0))
+					new_prc = realtime_prices[code]
+					
+					# 평균단가 (없으면 현재가로 가정하여 0% 처리)
+					avg_prc = int(stock.get('pchs_avg_pric', stock.get('avg_prc', 0)))
+					if avg_prc > 0:
+						# 수익률 재계산: ((현재가 - 평단) / 평단) * 100
+						new_pl_rt = ((new_prc - avg_prc) / avg_prc) * 100
+						
+						# 기존 데이터 업데이트
+						stock['cur_prc'] = new_prc
+						stock['pl_rt'] = f"{new_pl_rt:.2f}"
+						
+						# 평가금액도 갱신 (보유수량 * 현재가)
+						qty = int(stock.get('rmnd_qty', 0))
+						stock['evlu_amt'] = new_prc * qty
+						
+						logger.info(f"⚡ [Fast Update] {code}: {old_prc} -> {new_prc}원 (수익률 {new_pl_rt:.2f}%) - 실시간 반영")
+
 		# [자산 및 할당금액 계산]
 		total_stock_eval = 0
 		for stock in my_stocks:
