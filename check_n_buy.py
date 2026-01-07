@@ -1,4 +1,7 @@
 import time
+import math
+import json
+import datetime
 import threading # [Lock] 동시성 제어 추가
 from kiwoom_adapter import fn_kt00001, fn_ka10004, fn_kt10000, fn_kt00004, get_total_eval_amt
 from tel_send import tel_send
@@ -465,8 +468,6 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 
 		# [긴급 패치] 15시 이후 신규 진입 원천 봉쇄 (중복 매수 방지)
 		# 단, Mock 모드(테스트)일 때는 시간 제한 무시
-		import datetime
-		# from database_helpers import get_setting  <-- 삭제 (전역 사용)
 		is_mock = str(get_setting('use_mock_server', False)).lower() in ['1', 'true', 'on']
 		
 		# 실전 모드이면서 15시가 넘었을 때만 차단

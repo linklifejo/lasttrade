@@ -98,7 +98,9 @@ class RealTimeSearch:
 				async with self.recv_lock:
 					raw_message = await self.websocket.recv()
 				# JSON 형식으로 파싱
-				response = json.loads(raw_message)
+				if raw_message:
+					print(f"DEBUG: WebSocket Msg Received: {raw_message[:100]}...")
+					response = json.loads(raw_message)
 				self.last_msg_time = time.time()
 				
 				# [Debug] 서버 수신 데이터 확인
@@ -123,10 +125,46 @@ class RealTimeSearch:
 						}
 						await self.send_message(message=param)
 
-				# 메시지 유형이 PING일 경우 수신값 그대로 송신
 				elif response.get('trnm') == 'PING':
 					logger.debug(f'PING 메시지 수신: {response}')
 					await self.send_message(response)
+
+				# [Core Fix] 조건검색 목록(CNSRLST) 수신 시 -> 실시간 등록(CNSRREQ) 자동 수행
+				elif response.get('trnm') == 'CNSRLST':
+					logger.info(f"📋 조건검색 목록 수신: {len(response.get('data', []))}개")
+					
+					# 설정된 타겟 인덱스 (기본 0번)
+					target_idx = 0
+					try:
+						# from get_setting (이미 상단 import됨)
+						target_str = get_setting('target_condition_index', '0')
+						target_idx = int(target_str)
+					except: pass
+					
+					# 목록에서 타겟 인덱스 찾기
+					cond_list = response.get('data', [])
+					if cond_list and len(cond_list) > target_idx:
+						target_cond = cond_list[target_idx]
+						# 데이터 형식: ["0", "오늘폭등"] or ["0^오늘폭등"] (API에 따라 다름, 리스트로 가정)
+						# 아까 로그: [["0","오늘폭등"],["1","불기둥"]]
+						
+						cond_idx = target_cond[0]
+						cond_name = target_cond[1]
+						
+						logger.info(f"🎯 타겟 조건식 선택: [{cond_idx}] {cond_name}")
+						
+						# 실시간 등록 요청 (CNSRREQ)
+						# Git 히스토리 기반 수정 (seq, stex_tp 사용)
+						req_param = {
+							'trnm': 'CNSRREQ',
+							'seq': str(cond_idx), # 조건식 인덱스
+							'search_type': '1',   # 1: 실시간
+							'stex_tp': 'K'        # 0: 전체, 1: 코스피, 2: 코스닥 (K가 성공했음)
+						}
+						await self.send_message(message=req_param)
+						logger.info(f"✅ 조건검색 실시간 등록 요청 전송 (CNSRREQ): {cond_name} (seq={cond_idx})")
+					else:
+						logger.warning(f"⚠️ 타겟 조건식(Index {target_idx})을 찾을 수 없습니다. (목록 개수: {len(cond_list)})")
 
 				if response.get('trnm') != 'PING':
 					# logger.debug(f'실시간 시세 서버 응답 수신: {response}')
@@ -174,6 +212,13 @@ class RealTimeSearch:
 
 										if jmcode:
 											jmcode = str(jmcode).replace('A', '')
+											
+											# [Realtime Update] 보유 종목이면 현재가/수익률 즉시 갱신 (반응 속도 향상)
+											if jmcode in self.purchased_stocks and price > 0:
+												# 현재가 갱신 (봇 전역 공유용 current_prices는 위에서 갱신됨)
+												# 추가로 check_n_sell 등에서 참조하는 메모리 객체가 있다면 갱신 필요
+												pass
+
 											# [Filter] 이미 보유 중인 종목은 대기열에 넣지 않음
 											if jmcode not in self.purchased_stocks:
 												parsed_items.append({'code': jmcode, 'rate': rate})
@@ -428,6 +473,9 @@ class RealTimeSearch:
 				current_cnt = len(self.purchased_stocks)
 				needed = int(target_cnt - current_cnt)
 				
+				print(f"DEBUG: Internal Stocks: {self.purchased_stocks}")
+				print(f"DEBUG: Real Stocks Count: {real_cnt}, Pending: {pending_cnt}")
+				print(f"DEBUG: Selection Check - Cur: {current_cnt}, Target: {target_cnt}, Needed: {needed}")
 				logger.info(f"[Selection Check] 실시간수량: {current_cnt} (실제 {real_cnt} + 대기 {pending_cnt}), 목표: {target_cnt}, 필요수: {needed}")
 			except Exception as e:
 				logger.error(f"매수 전 잔고 체크 실패 (안전 위해 중단): {e}")

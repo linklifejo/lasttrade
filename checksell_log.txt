@@ -1,0 +1,10 @@
+2026-01-07 11:01:54 - trading_bot - INFO - [CheckSell] 011230 (삼화전자): Time=2m, PL=-0.7924%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:54 - trading_bot - INFO - [CheckSell] 012860 (모베이스전자): Time=22m, PL=-1.8253%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:54 - trading_bot - INFO - [CheckSell] 081150 (티플랙스): Time=7m, PL=-0.0332%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:54 - trading_bot - INFO - [CheckSell] 084680 (이월드): Time=19m, PL=0.3222%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:54 - trading_bot - INFO - [CheckSell] 263810 (상신전자): Time=1m, PL=0.2624%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:59 - trading_bot - INFO - [CheckSell] 011230 (삼화전자): Time=2m, PL=-0.7924%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:59 - trading_bot - INFO - [CheckSell] 012860 (모베이스전자): Time=22m, PL=-1.8253%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:59 - trading_bot - INFO - [CheckSell] 081150 (티플랙스): Time=7m, PL=-0.0332%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:59 - trading_bot - INFO - [CheckSell] 084680 (이월드): Time=19m, PL=0.3222%, Strategy=WATER, SL=-1.0%
+2026-01-07 11:01:59 - trading_bot - INFO - [CheckSell] 263810 (상신전자): Time=1m, PL=0.2624%, Strategy=WATER, SL=-1.0%

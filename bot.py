@@ -997,39 +997,8 @@ class MainApp:
 						logger.error(f"[MainLoop] 주기적 루프 오류:\n{traceback.format_exc()}")
 						await asyncio.sleep(5) # 오류 시 대기
 						
-				# [Auto Mode Switcher] 시간에 따라 실전/Mock 모드 자동 전환
-				# 08:50 ~ 15:35 : 실전 모드 (Real)
-				# 그 외 시간 : Mock 모드 (24/7 테스트)
-				curr_dt = datetime.datetime.now()
-				curr_hm = curr_dt.hour * 100 + curr_dt.minute
-				
-				# 목표 모드 결정
-				target_is_mock = False
-				if 850 <= curr_hm <= 1535: # 08:50 ~ 15:35 (실전)
-					target_is_mock = False
-				else: # 밤샘/새벽 (Mock)
-					target_is_mock = True
-					
-				# 현재 설정 확인
-				current_setting_val = str(get_setting('use_mock_server', '0')).lower()
-				current_is_mock = current_setting_val in ['1', 'true', 'on']
-				
-				# 불일치 시 전환 및 재시작
-				if current_is_mock != target_is_mock:
-					# 잦은 전환 방지를 위해 1분 단위 체크 (초가 0~5일 때만)
-					if curr_dt.second < 5:
-						from database_helpers import save_setting
-						new_val = '1' if target_is_mock else '0'
-						mode_name = "MOCK(연습)" if target_is_mock else "REAL(실전)"
-						
-						logger.warning(f"🔄 [Auto Mode Switch] 시간({curr_hm:04d})에 따라 모드를 전환합니다: {mode_name}")
-						save_setting('use_mock_server', new_val)
-						
-						# 재시작 트리거 (Watchdog이 다시 켜줌)
-						logger.info("♻️ 모드 적용을 위해 봇을 재시작합니다...")
-						self.keep_running = False
-						await asyncio.sleep(1)
-						return # 루프 탈출
+				# [Auto Mode Switcher] 시간 기반 Mock ↔ Real 자동 전환
+				await self.check_auto_mode_switch()
 
 				# 1분 통계 기록
 				now = datetime.datetime.now()
