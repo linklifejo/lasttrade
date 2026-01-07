@@ -6,6 +6,7 @@ import sqlite3
 import datetime
 import json
 import time
+import math
 from logger import logger
 from pathlib import Path
 import os
@@ -255,20 +256,37 @@ def get_current_status(mode='MOCK'):
 		target_stock_count = get_setting('target_stock_count', 5)
 		split_buy_cnt = get_setting('split_buy_cnt', 3)
 		
+		# [Fix] 모든 변수들 초기화 (UnboundLocalError 방지)
+		holdings = []
+		total_buy = 0
+		total_eval = 0
+		total_asset = 0
+		deposit = 0
+		total_pl = 0
+		
 		with get_db_connection() as conn:
-			holdings = []
-			total_buy = 0
-			total_eval = 0
 			
 			if mode == 'MOCK':
-				# Mock 모드: mock_holdings와 mock_prices에서 조회
+				# 0. 계좌 정보 먼저 조회 (전체 계산을 위해 필수)
+				acc_row = conn.execute('SELECT cash FROM mock_account WHERE id=1').fetchone()
+				deposit = int(acc_row['cash']) if acc_row else 0
+				
+				# 보유 주식 총 평가액 먼저 계산
+				eval_cursor = conn.execute('SELECT SUM(h.qty * p.current) as total_eval FROM mock_holdings h JOIN mock_prices p ON h.code = p.code WHERE h.qty > 0')
+				eval_row = eval_cursor.fetchone()
+				total_eval = int(eval_row['total_eval']) if eval_row and eval_row['total_eval'] else 0
+				
+				total_asset = deposit + total_eval
+				
+				# [추가] 단계 계산을 위한 총 매입원금(Principal) 선행 계산
+				pur_cursor = conn.execute('SELECT SUM(qty * avg_price) as total_pur FROM mock_holdings WHERE qty > 0')
+				pur_row = pur_cursor.fetchone()
+				total_buy_principal = int(pur_row['total_pur']) if pur_row and pur_row['total_pur'] else 0
+				
+				# 1. Mock 모드: mock_holdings와 mock_prices에서 세부 종목 조회
 				cursor = conn.execute('''
 					SELECT 
-						h.code,
-						s.name,
-						h.qty,
-						h.avg_price,
-						p.current as current_price
+						h.code, s.name, h.qty, h.avg_price, p.current as current_price
 					FROM mock_holdings h
 					LEFT JOIN mock_stocks s ON h.code = s.code
 					LEFT JOIN mock_prices p ON h.code = p.code
@@ -287,6 +305,8 @@ def get_current_status(mode='MOCK'):
 					pl_amt = evlt_amt - pur_amt
 					pl_rt = (pl_amt / pur_amt * 100) if pur_amt > 0 else 0
 					
+					total_buy += pur_amt
+					
 					# 보유 시간
 					held_since = get_held_time(code)
 					hold_time = "0분"
@@ -294,68 +314,51 @@ def get_current_status(mode='MOCK'):
 						minutes = int((time.time() - held_since) / 60)
 						hold_time = f"{minutes}분"
 					
-					# [Sync] 사용자 정의 수열(1:1:2:2:4) 기반 단계 계산
+					# [Sync] 1:1:2:4:8 가중치 기반 단계 계산
 					st_mode = get_setting('single_stock_strategy', 'WATER').upper()
-					split_buy_cnt = int(get_setting('split_buy_cnt', 5))
+					s_cnt = int(get_setting('split_buy_cnt', 5))
 					
-					# 1. 가중치 수열 생성
 					weights = []
-					for i in range(split_buy_cnt):
-						weight = 2**(i // 2)
-						weights.append(weight)
-					total_weight = sum(weights)
+					for i in range(s_cnt):
+						if i == 0: weights.append(1)
+						else: weights.append(2**(i - 1))
+					tw = sum(weights)
 					
-					# 2. 누적 비중 계산
 					cumulative_ratios = []
 					curr_s = 0
 					for w in weights:
 						curr_s += w
-						cumulative_ratios.append(curr_s / total_weight)
+						cumulative_ratios.append(curr_s / tw)
 					
-					# 3. 실제 투입액 기반 단계 판독
-					# 종목당 할당액 (순자산 * 70% / 목표종목수)
+					# [Fixed] 실제 투입액 기반 단계 판독
+					# 유저 요청: 손익률에 따라 단계가 출렁이지 않도록 '원금(Principal)' 기준 자산 사용
+					# total_asset(평가금) 대신 principal_basis(현금+매입원금)를 분모로 사용하여 단계 고정
+					principal_basis = deposit + total_buy_principal # 평가손익을 제외한 원금 기준 자산
 					capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
-					target_stock_count = float(get_setting('target_stock_count', 5))
-					alloc_per_stock = (total_asset * capital_ratio) / target_stock_count if target_stock_count > 0 else 1
+					target_stocks = float(get_setting('target_stock_count', 5))
+					alloc_per_stock = (principal_basis * capital_ratio) / target_stocks if target_stocks > 0 else 1
 					
 					actual_step = 0
+					ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
 					for i, threshold in enumerate(cumulative_ratios):
-						if pur_amt >= (alloc_per_stock * threshold * 0.90):
+						if ratio >= (threshold * 0.7): # 70% 이상 채워지면 해당 단계로 기민하게 인정
 							actual_step = i + 1
 					
-					display_step = actual_step if actual_step <= split_buy_cnt else split_buy_cnt
-					if display_step == 0: display_step = 1 # 진입 기본 1차
+					display_step = actual_step if actual_step <= s_cnt else s_cnt
+					if display_step == 0: display_step = 1
 					
-					mode_str = "물타기" if 'WATER' in st_mode else "불타기"
-					step_str = f"{mode_str} {display_step}차"
-					if display_step >= split_buy_cnt: step_str += "(MAX)"
+					step_str = f"{display_step}차"
+					if display_step >= s_cnt: step_str += "(MAX)"
 					
 					holdings.append({
-						'stk_cd': code,
-						'stk_nm': name,
-						'qty': qty,
-						'rmnd_qty': qty,
-						'avg_prc': avg_price,
-						'cur_prc': cur_price,
-						'pur_amt': pur_amt,
-						'evlt_amt': evlt_amt,
-						'pl_amt': pl_amt,
-						'pl_rt': f"{pl_rt:.2f}",
-						'hold_time': hold_time,
-						'watering_step': step_str,
-						'note': '매집 중'
+						'stk_cd': code, 'stk_nm': name, 'qty': qty, 'rmnd_qty': qty,
+						'avg_prc': avg_price, 'cur_prc': cur_price,
+						'pur_amt': pur_amt, 'evlt_amt': evlt_amt, 'pl_amt': pl_amt,
+						'pl_rt': f"{pl_rt:.2f}", 'hold_time': hold_time,
+						'watering_step': step_str, 'note': '매집 중'
 					})
-					
-					total_buy += pur_amt
-					total_eval += evlt_amt
-				
-				# Mock 계좌 현금 조회
-				acc_cursor = conn.execute('SELECT cash FROM mock_account WHERE id=1')
-				acc_row = acc_cursor.fetchone()
-				deposit = int(acc_row['cash']) if acc_row else 0
 				
 				total_pl = total_eval - total_buy
-				total_asset = deposit + total_eval
 				
 			else:
 				# Real 모드: API에서 실시간 데이터 가져오기
@@ -410,10 +413,12 @@ def get_current_status(mode='MOCK'):
 					else:
 						deposit = total_asset = total_buy = total_pl = 0
 
-					# [추가] 종목당 할당액 계산 (순자산 * 70% / 목표종목수)
+					# [추가] 종목당 할당액 계산
+					# 유저 요청: 손익률/평가금에 따라 단계가 변하지 않도록 원금 기준(예수금+총내입금) 사용
+					principal_basis = deposit + total_buy
 					capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
 					target_stock_count_val = float(get_setting('target_stock_count', 5))
-					alloc_per_stock = (total_asset * capital_ratio) / target_stock_count_val if target_stock_count_val > 0 else 1
+					alloc_per_stock = (principal_basis * capital_ratio) / target_stock_count_val if target_stock_count_val > 0 else 1
 					split_buy_cnt_val = int(get_setting('split_buy_cnt', 5))
 
 					# 보유종목 상세 정보 구성
@@ -447,33 +452,35 @@ def get_current_status(mode='MOCK'):
 								minutes = int((time.time() - held_since) / 60)
 								hold_time = f"{minutes}분"
 							
-							# [Dynamic Step Calculation] 1:1:2:2:4 원칙 적용
+							# [Dynamic Step Calculation] 1:1:2:4:8 원칙 적용
 							try:
-								# 1. 가중치 수열 (1, 1, 2, 2, 4...)
+								# 1. 가중치 수열 (1, 1, 2, 4, 8...)
 								weights = []
 								for i in range(split_buy_cnt_val):
-									weights.append(2**(i // 2))
+									if i == 0: weights.append(1)
+									else: weights.append(2**(i - 1))
 								tw = sum(weights)
 								
 								# 2. 단계 판독
-								step_idx = 0
+								cumulative_ratios = []
 								curr_s = 0
-								for i, w in enumerate(weights):
+								for w in weights:
 									curr_s += w
-									th = curr_s / tw
-									if pur_amt >= (alloc_per_stock * th * 0.90):
-										step_idx = i + 1
-									else:
-										break
+									cumulative_ratios.append(curr_s / tw)
 								
-								if step_idx <= 1: step_str = "1차"
-								else:
-									s_mode = str(get_setting('single_stock_strategy', 'WATER')).upper()
-									m_str = "물타기" if 'WATER' in s_mode else "불타기"
-									step_str = f"{m_str} {step_idx}차"
-									if step_idx >= split_buy_cnt_val: step_str += "(MAX)"
+								step_idx = 0
+								# [Stable Fix] alloc_per_stock이 principal_basis 기반이므로 출렁이지 않음
+								ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+								for i, threshold in enumerate(cumulative_ratios):
+									if ratio >= (threshold * 0.7):
+										step_idx = i + 1
+								
+								if step_idx == 0: step_idx = 1
+								step_str = f"{step_idx}차"
+								if step_idx >= split_buy_cnt_val: step_str += "(MAX)"
 							except:
 								step_str = "보유중"
+
 
 							holdings.append({
 								'stk_cd': code, 'stk_nm': name, 'qty': qty, 'rmnd_qty': qty,
@@ -511,20 +518,11 @@ def get_current_status(mode='MOCK'):
 				},
 				'holdings': holdings
 			}
-			
-			# Real 모드 캐시 저장
-			if mode == 'REAL' and total_asset > 0:
-				_status_cache = result
-				_last_status_time = time.time()
-				
+			# [Sensitive Update] 캐시 사용 안 함 (무조건 실시간)
 			return result
-
 			
 	except Exception as e:
 		logger.error(f"상태 조회 실패: {e}")
-		if mode == 'REAL' and _status_cache:
-			logger.info("캐시된 데이터를 반환합니다.")
-			return _status_cache
 		return {
 			'summary': {
 				'total_asset': 0,

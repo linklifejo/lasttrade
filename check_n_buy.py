@@ -243,7 +243,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		if current_balance_data:
 			# bot.py에서 넘겨주는 key는 'deposit'임
 			balance = int(current_balance_data.get('deposit', 0))
-			# 혹시 'balance'로 올 수도 있으니 체크
+			# 혹은 'balance'로 올 수도 있으니 체크
 			if balance == 0: 
 				balance = int(current_balance_data.get('balance', 0))
 				
@@ -254,13 +254,34 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			else:
 				net_asset = int(current_balance_data.get('net_asset', 0))
 				
-			# stock_val 추정 (자산 - 현금)
+			# [추가] 매입원금(Principal) 기반 자산 계산을 위해 total_pur_amt 확보
+			# current_balance_data에 'total_pur_amt'가 있으면 사용, 없으면 net_asset에서 평가손익 제외 시도
+			total_pur_amt = int(current_balance_data.get('total_pur_amt', 0))
+			if total_pur_amt == 0 and current_holdings:
+				for s in current_holdings:
+					try:
+						total_pur_amt += float(s.get('pchs_avg_pric', 0)) * int(s.get('rmnd_qty', 0))
+					except: pass
+			
 			stock_val = net_asset - balance
 		else:
 			balance, _, deposit_amt = get_balance(token=token)
 			stock_val = get_total_eval_amt(token=token)
 			net_asset = deposit_amt + stock_val
-		
+			
+			# API에서 상세 평가 현황 가져오기 (매입원금 합산용)
+			total_pur_amt = 0
+			if current_holdings:
+				for s in current_holdings:
+					try:
+						total_pur_amt += float(s.get('pchs_avg_pric', 0)) * int(s.get('rmnd_qty', 0))
+					except: pass
+
+		# [Stable Basis] 유저 요청: 손익률에 따라 단계가 변하지 않도록 '원금' 기준 자산 정의
+		# basis_asset: 실제 투자된 원금 + 남은 예수금 (미실현 손익 제외)
+		basis_asset = deposit_amt + total_pur_amt
+		if basis_asset <= 0: basis_asset = net_asset # Fallback
+				
 		# [Fix] 예수금 0원 이슈 및 키 매핑 오류 대응
 		if balance <= 0:
 			# API가 deposit만 0으로 주는 경우 또는 키 매핑 실패 시 역산 시도
@@ -275,6 +296,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	except Exception as e:
 		logger.error(f"자산 조회 오류: {e}")
 		return False
+
     
     # [방어 로직] 내부 추적 데이터 초기화 (만약 API에서 종목이 사라졌다면 매도된 것이므로 초기화)
 	if current_holding is None and stk_cd in accumulated_purchase_amt:
@@ -395,8 +417,9 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	except:
 		MIN_PURCHASE_AMOUNT = 2000
 
-	# 종목당 총 배정 금액 (순자산의 설정 비율만큼 사용 * 수학적 가중치)
-	alloc_per_stock = ((net_asset * capital_ratio) / target_cnt) * math_weight
+	# 종목당 총 배정 금액 (원금 기준 자산의 설정 비율만큼 사용 * 수학적 가중치)
+	# 유저 요청: 손익률/평가금에 따라 단계가 변하지 않도록 basis_asset 사용
+	alloc_per_stock = ((basis_asset * capital_ratio) / target_cnt) * math_weight
 	
 	# [1:1:2:4... 기하급수적 분할 매수 로직 적용]
 	# 분할 매수 횟수에 따라 자동으로 가중치를 계산합니다. (1, 1, 2, 4, 8, 16...)
@@ -475,7 +498,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			logger.warning(f"[시간 제한] 15시 이후 신규 매수 금지 ({stk_cd}) - 장 마감 임박")
 			return False
 
-		# [수정] 1:1:2:2:4 비율대로 직접 매수 (initial_buy_ratio 제거)
+		# [수정] 1:1:2:4:8 비율대로 직접 매수 (initial_buy_ratio 제거)
 		# 1단계 = 전체 할당액의 10% (가중치 1/10)
 		target_ratio_1st = cumulative_ratios[0]
 		one_shot_amt = alloc_per_stock * target_ratio_1st
@@ -544,55 +567,38 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# 현재 매입 비율
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
-		# 2. [물타기 단계 계산 - 수익률 기반 직관적 로직]
-		# 사용자 규칙: 신규 매수 후 설정된 간격(예: 4%)만큼 떨어질 때마다 다음 단계 진입
+		# [Step Calc] 1:1:2:4:8 비중 기반 정밀 단계 판독
+		actual_current_step = 1
+		for i, ratio in enumerate(cumulative_ratios):
+			# 현재 매입 비중이 누적 비중의 70% 이상 채워졌다면 해당 단계로 기민하게 인정
+			if filled_ratio >= (ratio * 0.7):
+				actual_current_step = i + 1
+		
+		# [UI Sync]
+		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt
+		if current_holding:
+			current_holding['current_step'] = display_step
+			
+		logger.info(f"[Step Calc] {stk_cd}: 매입비중({filled_ratio*100:.1f}%) -> {display_step}차 판독")
+
+		# 2. [물타기 목표 설정]
 		strategy_rate_val = float(get_setting('single_stock_rate', 4.0))
 		if strategy_rate_val <= 0: strategy_rate_val = 4.0
-		logger.info(f"[Debug] {stk_cd} 물타기 간격 설정값: {strategy_rate_val}%")
-
-		# [단계 판독 로직 정밀화 - LASTTRADE 수열 적용]
-		actual_current_step = 0
-		if alloc_per_stock > 0:
-			# [소액 계좌 보정] 할당액이 너무 적으면(예: 5만원 미만), 금액 기반 판독이 왜곡됨.
-			if alloc_per_stock < 50000:
-				# [수정] 설정된 최소 금액 연동 (수익률 기반 단계 판독의 한계 보완)
-				# 싼 주식도 단계 인정 (올림 처리)
-				actual_current_step = int(math.ceil(cur_pchs_amt / MIN_PURCHASE_AMOUNT))
-				if actual_current_step < 1: actual_current_step = 1
-				
-				logger.info(f"[소액 보정] {stk_cd}: 매입금({cur_pchs_amt:,.0f}원)/단위({MIN_PURCHASE_AMOUNT}원) -> 물리적 단계({actual_current_step}차) 적용")
-			else:
-				for i, ratio in enumerate(cumulative_ratios):
-					if cur_pchs_amt >= (alloc_per_stock * ratio * 0.98):
-						actual_current_step = i + 1
 		
-		# [Fix] UI 표시용 단계도 내부 로직(소액 보정 포함)과 일치시킴
-		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt
-
-		# (아래 중복된 strategy_rate_val 정의 부분 제거 또는 유지 - 여기서는 위로 올렸으므로 아래는 주석처리하거나 놔둠)
-		# strategy_rate_val = float(get_setting('single_stock_rate', 4.0))  <-- 이미 위에서 읽음
+		# [수정] 상대적 물타기 판정 (수익률은 단계에 종속됨)
+		# 현재 단계(actual_current_step) 평단 대비 설정된 간격(Interval)만큼 하락했는가?
+		# 예: -11% 하락 / 5% 간격 = 2단계 점프 -> 현재 1차 + 2 = 3차 목표
+		steps_to_jump = int(abs(pl_rt) // strategy_rate_val) if pl_rt < 0 else 0
+		theoretical_target_step = actual_current_step + steps_to_jump
 		
-		# [Critical Fix] 물타기 목표 단계 계산 로직 변경 (절대 수익률 -> 상대적 단계 상승)
-		# 기존: 총수익률 -12%여야 4차 진입 (평단 낮아지면 진입 불가 오류)
-		# 수정: 현재 수익률이 -4%(strategy_rate_val) 이하기만 하면 '현재 단계 + 1'을 목표로 설정
+		if theoretical_target_step > split_cnt: theoretical_target_step = split_cnt
 		
-		# 일단 목표를 현재 단계로 초기화
-		target_step_index = actual_current_step # 1차 -> index 1 (2차 목표)
-		
-		# 현재 수익률이 기준선(예: -4%) 이하면 다음 단계 진입 허용
-		if pl_rt <= (-1.0 * strategy_rate_val):
-			# 예: 현재 3차, 수익률 -4.5% -> 목표 4차
-			target_step_index = actual_current_step
-			# 단, 이미 MAX(5차)면 더 못 감
-			if target_step_index >= split_cnt:
-				target_step_index = split_cnt - 1
+		# 목표 단계가 현재 단계보다 높을 때만 진입 (진정한 추가 매수)
+		if theoretical_target_step > actual_current_step:
+			target_step_by_amt = theoretical_target_step - 1 # 인텍스 기준
+			logger.info(f"🚩 [Relative Watering] {stk_cd}: 현재 {actual_current_step}차 (수익률 {pl_rt}%) -> 목표 {theoretical_target_step}차로 이동 결정")
 		else:
-			# 수익률이 -4%보다 좋으면(예: -2%), 추가 매수 불필요 -> 목표를 현재 단계보다 낮게 잡거나 유지
-			# 여기서는 '매수 안 함'을 유도하기 위해 -1 처리
-			target_step_index = actual_current_step - 1
-
-		# 변수명 호환성 유지 (target_step_by_amt는 index 개념)
-		target_step_by_amt = target_step_index
+			target_step_by_amt = -1
 			
 		# 더미 변수 설정 (로깅용)
 		current_loss_amt = 0
