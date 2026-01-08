@@ -429,15 +429,24 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # 0.5초마다 상태 전송
+            # 2초마다 상태 전송 (부하 감소 및 데이터 일관성)
             try:
-                from database_helpers import get_system_status
-                data = get_system_status()
+                from database_helpers import get_current_status, get_setting
+                
+                # 1. 모드 확인
+                use_mock = get_setting('use_mock_server', True)
+                is_paper = get_setting('is_paper_trading', True)
+                mode = "MOCK" if use_mock else ("PAPER" if is_paper else "REAL")
+                
+                # 2. 통합된 상태 조회 함수 사용 (DB값 대신 실시간 값)
+                # 이로써 REST API와 WebSocket이 동일한 로직(매수 횟수 카운트 등)을 공유하게 됨
+                data = get_current_status(mode)
+                
                 if data:
                     await websocket.send_json(data)
             except Exception as e:
                 pass # 연결 종료 등 예외 처리
-            await asyncio.sleep(1.0)  # 0.5초 -> 1초 (서버 부하 감소)
+            await asyncio.sleep(2.0)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
