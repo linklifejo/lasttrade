@@ -116,11 +116,12 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			try:
 				p_amt = float(s.get('pchs_amt', s.get('pur_amt', 0)))
 				if p_amt == 0:
-					qty = int(s.get('rmnd_qty', 0))
-					avg = float(s.get('pchs_avg_pric', s.get('avg_prc', 0)))
-					p_amt = qty * avg
+					_q = int(float(str(s.get('rmnd_qty', s.get('hold_qty', s.get('qty', 0)))).replace(',', '')))
+					_a = float(str(s.get('pchs_avg_pric', s.get('avg_prc', 0))).replace(',', ''))
+					p_amt = _q * _a
 				total_buy_principal += p_amt
 			except: pass
+
 
 		principal_basis = deposit_amt + total_buy_principal
 		capital_ratio = float(cached_setting('trading_capital_ratio', 70)) / 100.0
@@ -134,7 +135,13 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			holdings_codes.append(stock_code) 
 
 			pl_rt = float(stock['pl_rt']) if stock['pl_rt'] else 0.0
-			qty = int(stock.get('rmnd_qty', 0))
+			# [Robust Qty Extractor] 1주인데 이전 루프 변수가 남지 않도록 매 루프마다 새로 추출
+			try:
+				qty_raw = stock.get('rmnd_qty', stock.get('hold_qty', stock.get('qty', 0)))
+				qty = int(float(str(qty_raw).replace(',', '')))
+			except:
+				qty = 0
+
 
 			
 			elapsed_str = ""
