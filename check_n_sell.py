@@ -201,10 +201,15 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					if cur_step < 1: cur_step = 1
 
 				else:
-					for i, ratio in enumerate(cumulative_ratios):
-						# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
-						if pchs_amt >= (alloc_per_stock * ratio * 0.98):
-							cur_step = i + 1
+					# [Intuition Fix] 수량이 1주라면 비중과 상관없이 무조건 1차로 판정
+					if qty <= 1:
+						cur_step = 1
+					else:
+						for i, ratio in enumerate(cumulative_ratios):
+							# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
+							if pchs_amt >= (alloc_per_stock * ratio * 0.98):
+								cur_step = i + 1
+
 			
 			# [수정] 비중 90% 조건 삭제 (마틴게일 4차/5차 구분 명확화 필요)
 			# [진짜 수정] 금액 비율(Ratio) 기반 MAX 판정 (UI와 동기화)
@@ -257,7 +262,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				# [조기 손절 (Early Stop)]
 				# 원칙: 4차 매수 시 평단가는 -2% 수준으로 수렴함 (사용자 정의)
 				# 여기서 '개별종목손절률'만큼 더 하락하면 5차(MAX) 진입 전 전량 손절
-				if cur_step == (split_buy_cnt - 1):
+				# [Fix] 1주만 보유한 경우(qty=1)는 조기손절 대상에서 제외 (물타기 기회 보장)
+				if cur_step == (split_buy_cnt - 1) and qty > 1:
+
 					# 조기 손절 타겟 = -2.0% (4차 수렴 평단) - 개별종목손절률 (무조건 추가 하락분으로 처리)
 					# Dashboard의 손절률이 3(%)이면 -2 - 3 = -5%에서 매도
 					early_stop_target = -2.0 - abs(SL_RATE)
