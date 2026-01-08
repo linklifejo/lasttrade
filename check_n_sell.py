@@ -193,9 +193,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			
 			if qty <= 1:
 				cur_step = 1
+			# DB 기록이 없으면 기본 1차 (수량 기반 추정 삭제)
 			elif cur_step == 0 and qty > 0:
-				import math
-				cur_step = int(math.log2(qty) + 1)
+				cur_step = 1
 			
 			if cur_step < 1: cur_step = 1
 			if cur_step > split_buy_cnt: cur_step = split_buy_cnt

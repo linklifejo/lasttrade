@@ -586,10 +586,9 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# [절대 규칙] 1주면 무조건 1차
 		if cur_pchs_qty <= 1:
 			actual_current_step = 1
-		# DB 기록이 없으면 수량으로 추정 (fallback)
+		# DB 기록이 없으면 기본 1차로 시작 (수량 기반 추정 제거)
 		elif actual_current_step == 0 and cur_pchs_qty > 0:
-			import math
-			actual_current_step = int(math.log2(cur_pchs_qty) + 1)
+			actual_current_step = 1
 		
 		if actual_current_step < 1: actual_current_step = 1
 		

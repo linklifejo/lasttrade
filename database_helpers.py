@@ -330,33 +330,23 @@ def get_current_status(mode='MOCK'):
 						curr_s += w
 						cumulative_ratios.append(curr_s / tw)
 					
-					# [Step Calc] Pure Quantity Mapping (사용자 직관 우선)
-					# 수량에 따라 단계를 역산합니다. (1->1, 2->2, 4->3, 8->4, 16->5)
-					try:
-						if qty <= 1:
-							actual_step = 1
-						else:
-							actual_step = int(math.log2(qty) + 1)
-					except:
+					# [Step Calc] Transaction Count Method (매수 명령 횟수 = 단계)
+				# 마지막 매도 이후 매수 횟수를 세어 단계 결정 (1번=1차, 2번=2차...)
+				try:
+					cursor = conn.execute('''
+						SELECT COUNT(*) FROM trades 
+						WHERE mode = ? AND code = ? AND type = 'buy'
+						AND timestamp > (
+							SELECT COALESCE(MAX(timestamp), '2000-01-01') 
+							FROM trades 
+							WHERE mode = ? AND code = ? AND type = 'sell'
+						)
+					''', (mode, code, mode, code))
+					actual_step = int(cursor.fetchone()[0])
+					if actual_step < 1:
 						actual_step = 1
-					
-					# DB 카운트와 대조 보정
-					try:
-						cursor = conn.execute('''
-							SELECT COUNT(*) FROM trades 
-							WHERE mode = ? AND code = ? AND type = 'buy'
-							AND timestamp > (
-								SELECT COALESCE(MAX(timestamp), '2000-01-01') 
-								FROM trades 
-								WHERE mode = ? AND code = ? AND type = 'sell'
-							)
-						''', (mode, code, mode, code))
-						db_s = int(cursor.fetchone()[0])
-						if db_s > 0 and abs(db_s - actual_step) <= 1:
-							actual_step = db_s
-					except: pass
-
-					if qty <= 1: actual_step = 1 # 최종 가드
+				except:
+					actual_step = 1
 
 					
 					display_step = actual_step if actual_step <= s_cnt else s_cnt
@@ -468,44 +458,26 @@ def get_current_status(mode='MOCK'):
 								minutes = int((time.time() - held_since) / 60)
 								hold_time = f"{minutes}분"
 							
-							# [Dynamic Step Calculation] 1:1:2:4:8 원칙 적용
+							# [Step Calc] Transaction Count Method (매수 명령 횟수 = 단계)
+							# 마지막 매도 이후 매수 횟수를 세어 단계 결정 (1번=1차, 2번=2차...)
 							try:
-								# 1. 가중치 수열 (1, 1, 2, 4, 8...)
-								weights = []
-								for i in range(split_buy_cnt_val):
-									if i == 0: weights.append(1)
-									else: weights.append(2**(i - 1))
-								tw = sum(weights)
-								
-								# [Step Calc] Pure Quantity Mapping (사용자 직관 우선)
-								try:
-									if qty <= 1:
-										step_idx = 1
-									else:
-										step_idx = int(math.log2(qty) + 1)
-								except:
+								cursor = conn.execute('''
+									SELECT COUNT(*) FROM trades 
+									WHERE mode = ? AND code = ? AND type = 'buy'
+									AND timestamp > (
+										SELECT COALESCE(MAX(timestamp), '2000-01-01') 
+										FROM trades 
+										WHERE mode = ? AND code = ? AND type = 'sell'
+									)
+								''', (mode, code, mode, code))
+								step_idx = int(cursor.fetchone()[0])
+								if step_idx < 1:
 									step_idx = 1
 								
-								# DB 카운트와 대조
-								try:
-									cursor = conn.execute('''
-										SELECT COUNT(*) FROM trades 
-										WHERE mode = ? AND code = ? AND type = 'buy'
-										AND timestamp > (
-											SELECT COALESCE(MAX(timestamp), '2000-01-01') 
-											FROM trades 
-											WHERE mode = ? AND code = ? AND type = 'sell'
-										)
-									''', (mode, code, mode, code))
-									db_sc = int(cursor.fetchone()[0])
-									if db_sc > 0 and abs(db_sc - step_idx) <= 1:
-										step_idx = db_sc
-								except: pass
-								
-								if qty <= 1: step_idx = 1 # 최종 가드
 								display_step = step_idx if step_idx <= split_buy_cnt_val else split_buy_cnt_val
 								step_str = f"{display_step}차"
-								if display_step >= split_buy_cnt_val: step_str += "(MAX)"
+								if display_step >= split_buy_cnt_val: 
+									step_str += "(MAX)"
 							except:
 								step_str = "보유중"
 
