@@ -150,7 +150,30 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				minutes = (time.time() - held_since[stock_code]) / 60
 				elapsed_str = f"Time={minutes:.0f}m, "
 
-			logger.info(f"[CheckSell] {stock_code} ({stock_name}): {elapsed_str}PL={pl_rt}%, Strategy={single_strategy}, SL={SL_RATE}%")
+			# [단계 판독 - 금액 비중(Filled Ratio) 기반으로 완전 교체]
+			# (수량 기반 log2 방식은 저가주에서 오류를 일으키므로 폐기)
+			pchs_amt = 0
+			if 'pur_amt' in stock and stock['pur_amt']: pchs_amt = int(stock['pur_amt'])
+			elif 'pchs_amt' in stock and stock['pchs_amt']: pchs_amt = int(stock['pchs_amt'])
+			else:
+				try: pchs_amt = float(stock.get('pchs_avg_pric', 0)) * int(stock.get('rmnd_qty', 0))
+				except: pchs_amt = 0
+				
+			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+			
+			# 1:1:2:4:8 수열 기준 누적 비중 (약 6.25%, 12.5%, 25%, 50%, 100%)
+			if filled_ratio < 0.08: cur_step = 1       # 1차
+			elif filled_ratio < 0.18: cur_step = 2     # 2차
+			elif filled_ratio < 0.35: cur_step = 3     # 3차
+			elif filled_ratio < 0.70: cur_step = 4     # 4차
+			else: cur_step = 5                        # 5차(MAX)
+
+			# DB 기록(사용자 수동 매수 클릭 등)이 더 높으면 DB 기록 존중
+			mode_key = "REAL" if not cached_setting('use_mock_server', False) else "MOCK"
+			cur_step_db = get_watering_step_count_sync(stock_code, mode=mode_key)
+			if cur_step_db > cur_step: cur_step = cur_step_db
+
+			logger.info(f"[CheckSell] {stock_code} ({stock_name}): {elapsed_str}PL={pl_rt}%, Step={cur_step}차, Weight={filled_ratio*100:.1f}%, SL={SL_RATE}%")
 			
 			# [Safety] 재시작 직후 안전장치 (Smart Warm-up)
 			# 수익률이 -20%보다 좋으면(-10% 등) 60초간 매도 유예 (물타기 기회 부여)
@@ -165,46 +188,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			should_sell = False
 			sell_reason = ""
 
-			# [매입 금액 계산]
-			pchs_amt = 0
-			if 'pur_amt' in stock and stock['pur_amt']: pchs_amt = int(stock['pur_amt'])
-			elif 'pchs_amt' in stock and stock['pchs_amt']: pchs_amt = int(stock['pchs_amt'])
-			else:
-				try: pchs_amt = float(stock.get('pchs_avg_pric', 0)) * int(stock.get('rmnd_qty', 0))
-				except: pchs_amt = 0
-
-			# [단계 추정 정밀화 - LASTTRADE 수열 적용]
-			# 1:1:2:4:8... 방식의 누적 비중 리스트 생성 (check_n_buy와 동일)
-			weights = []
-			for i in range(split_buy_cnt):
-				if i == 0: weights.append(1)
-				else: weights.append(2**(i - 1))
-			total_weight = sum(weights)
-			
-			cumulative_ratios = []
-			current_sum = 0
-			for w in weights:
-				current_sum += w
-				cumulative_ratios.append(current_sum / total_weight)
-
-			# [Step Calc] Transaction Count Method (사용자 요구: 매수 명령 횟수 = 단계)
-			mode_key = "REAL" if not cached_setting('use_mock_server', False) else "MOCK"
-			cur_step = get_watering_step_count_sync(stock_code, mode=mode_key)
-			
-			if qty <= 1:
-				cur_step = 1
-			# DB 기록이 없으면 기본 1차 (수량 기반 추정 삭제)
-			elif cur_step == 0 and qty > 0:
-				cur_step = 1
-			
-			if cur_step < 1: cur_step = 1
+			# [위에서 계산된 cur_step 및 filled_ratio 재사용]
 			if cur_step > split_buy_cnt: cur_step = split_buy_cnt
-
-			
-			# [수정] 비중 90% 조건 삭제 (마틴게일 4차/5차 구분 명확화 필요)
-			# [진짜 수정] 금액 비율(Ratio) 기반 MAX 판정 (UI와 동기화)
-			# 금액이 할당량의 70% 이상이면, 설령 계산상 4차라도 MAX(5차) 급으로 간주하여 손절/익절 로직 적용
-			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
 			# [Stable MAX logic] 
 			# filled_ratio 임계값을 상향(0.7->0.95)하여 조금 더 여유를 줌
 			is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.95)
@@ -257,9 +242,13 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				# 여기서 '개별종목손절률'만큼 더 하락하면 5차(MAX) 진입 전 전량 손절
 				# [Fix] 1주만 보유한 경우(qty=1)는 조기손절 대상에서 제외 (물타기 기회 보장)
 				# [Fix] 비중이 제대로 실리지 않았는데(자금부족 등) 단계만 올라가서 조기손절 나가는 것 방지
-				if cur_step >= EARLY_STOP_STEP and qty > 1 and filled_ratio >= 0.45:
+				# 다만 사용자가 2차/3차 등 낮은 단계를 설정한 경우를 위해 0.45 고정 조건을 제거
+				if cur_step >= EARLY_STOP_STEP and qty > 1:
 					# 조기 손절 타겟 = -2.0% (수렴 평단) - 개별종목손절률 (무조건 추가 하락분으로 처리)
 					early_stop_target = -2.0 - abs(SL_RATE)
+					
+					# [Debug] 감시 로그 추가 (한 번만 출력되도록 나중에 조정 필요할 수 있음)
+					# logger.debug(f"[EarlyStop Check] {stock_name}: Step={cur_step}, PL={pl_rt}%, Target={early_stop_target}%")
 					
 					if pl_rt <= early_stop_target:
 						should_sell = True

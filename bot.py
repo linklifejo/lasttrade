@@ -733,12 +733,14 @@ class MainApp:
 					s_cnt = int(float(get_setting('split_buy_cnt', 5))) # 분할 횟수
 					
 					f_step = 0
-					# [Step Calc] Pure Quantity Mapping (사용자 직관 우선)
+					# [Step Calc] Weight-based Mapping (매매 로직과 일관성 유지)
 					try:
-						if qty <= 1:
-							computed_step = 1
-						else:
-							computed_step = int(math.log2(qty) + 1)
+						f_ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+						if f_ratio < 0.08: computed_step = 1
+						elif f_ratio < 0.18: computed_step = 2
+						elif f_ratio < 0.35: computed_step = 3
+						elif f_ratio < 0.70: computed_step = 4
+						else: computed_step = 5
 					except:
 						computed_step = 1
 
