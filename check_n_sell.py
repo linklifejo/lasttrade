@@ -247,24 +247,24 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						sell_reason = f"TrailingStop({display_step_str})"
 						logger.info(f"🛡️ [LASTTRADE TS] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (익절 수익률: {pl_rt}%)")
 
-			# 2. [물타기(WATER) 전략 특수 로직]
+			# [2. 조기 손절 (Early Stop)]
 			if not should_sell and single_strategy == "WATER":
-				# [조기 손절 (Early Stop)]
-				# 원칙: 4차 매수 시 평단가는 -2% 수준으로 수렴함 (사용자 정의)
+				# [설정 연동] 사용자가 설정한 조기 손절 단계 로드 (기본값: 4차)
+				try: EARLY_STOP_STEP = int(cached_setting('early_stop_step', split_buy_cnt - 1))
+				except: EARLY_STOP_STEP = split_buy_cnt - 1
+
+				# 원칙: 설정된 단계 이상 매수 시 평단가는 -2% 수준으로 수렴함 (사용자 정의)
 				# 여기서 '개별종목손절률'만큼 더 하락하면 5차(MAX) 진입 전 전량 손절
 				# [Fix] 1주만 보유한 경우(qty=1)는 조기손절 대상에서 제외 (물타기 기회 보장)
 				# [Fix] 비중이 제대로 실리지 않았는데(자금부족 등) 단계만 올라가서 조기손절 나가는 것 방지
-				# 4차 매수 누적 비중은 약 50% (1:1:2:4 / 16). 따라서 45% 이상일 때 조기손절 허용
-				if cur_step >= (split_buy_cnt - 1) and qty > 1 and filled_ratio >= 0.45:
-
-					# 조기 손절 타겟 = -2.0% (4차 수렴 평단) - 개별종목손절률 (무조건 추가 하락분으로 처리)
-					# Dashboard의 손절률이 3(%)이면 -2 - 3 = -5%에서 매도
+				if cur_step >= EARLY_STOP_STEP and qty > 1 and filled_ratio >= 0.45:
+					# 조기 손절 타겟 = -2.0% (수렴 평단) - 개별종목손절률 (무조건 추가 하락분으로 처리)
 					early_stop_target = -2.0 - abs(SL_RATE)
 					
 					if pl_rt <= early_stop_target:
 						should_sell = True
 						sell_reason = f"조기손절({cur_step}차/비중{filled_ratio*100:.0f}%)"
-						logger.warning(f"✂️ [조기 손절] {stock_name}: 4차 수렴선(-2%) 대비 추가 하락({SL_RATE}%) 발생 ({cur_step}차, 비중 {filled_ratio*100:.0f}%) -> 손절 진행")
+						logger.warning(f"✂️ [조기 손절] {stock_name}: 설정 단계({EARLY_STOP_STEP}차) 도달 및 수렴선(-2%) 대비 추가 하락({SL_RATE}%) 발생 -> 손절")
 
 
 

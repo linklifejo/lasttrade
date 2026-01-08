@@ -690,7 +690,8 @@ const SETTING_KEYS = [
     'target_profit_amt',
     'global_loss_rate',
     'trailing_stop_activation_rate',
-    'trailing_stop_callback_rate'
+    'trailing_stop_callback_rate',
+    'early_stop_step'
 ];
 
 async function loadSettings() {
@@ -893,7 +894,7 @@ async function saveSettings() {
             'global_loss_rate', 'target_profit_amt', 'liquidation_time', 'use_trailing_stop',
             'trailing_stop_activation_rate', 'trailing_stop_callback_rate', 'use_rsi_filter',
             'rsi_limit', 'upper_limit_rate', 'time_cut_minutes', 'time_cut_profit', 'mock_volatility_rate', 'min_purchase_amount',
-            'sell_rebuy_wait_seconds',
+            'sell_rebuy_wait_seconds', 'early_stop_step',
             'real_app_key', 'real_app_secret', 'paper_app_key', 'paper_app_secret',
             'telegram_token', 'telegram_chat_id', 'my_account'
         ];
