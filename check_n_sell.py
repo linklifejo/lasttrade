@@ -134,6 +134,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			holdings_codes.append(stock_code) 
 
 			pl_rt = float(stock['pl_rt']) if stock['pl_rt'] else 0.0
+			qty = int(stock.get('rmnd_qty', 0))
+
 			
 			elapsed_str = ""
 			if held_since and stock_code in held_since:
@@ -210,10 +212,10 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
 			# [Stable MAX logic] 
 			# filled_ratio 임계값을 상향(0.7->0.95)하여 조금 더 여유를 줌
-			qty = int(stock.get('rmnd_qty', 0))
 			is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.95)
 			# [Fix] 1주만 보유한 경우(qty=1), 예산상으로는 MAX더라도 전략상 '초동'으로 보아 손절 유예 대상이 됨
 			is_actually_max = is_max_bought and (qty > 1 or single_strategy != "WATER")
+
 
 
 			# [Time-Cut 로직]

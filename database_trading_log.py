@@ -261,3 +261,23 @@ def clear_old_trades(days=30):
 	except Exception as e:
 		logger.error(f"❌ 오래된 로그 삭제 실패: {e}")
 		return 0
+
+def delete_stock_trades(code, mode=None):
+	"""특정 종목의 오늘 매매 기록 삭제 (초기화용)"""
+	today = datetime.datetime.now().strftime('%Y-%m-%d')
+	try:
+		with get_db_connection() as conn:
+			# [중요] 매도 기록(sell)은 남기고, 매수 기록(buy)만 삭제하여 초기화
+			query = "DELETE FROM trades WHERE code = ? AND timestamp LIKE ? AND type = 'buy'"
+			params = [code, f"{today}%"]
+			
+			if mode:
+				query += " AND mode = ?"
+				params.append(mode)
+				
+			cursor = conn.execute(query, tuple(params))
+			conn.commit()
+			if cursor.rowcount > 0:
+				logger.info(f"✅ {code} 매수 기록 초기화 완료 (재진입 준비, {cursor.rowcount}건 삭제)")
+	except Exception as e:
+		logger.error(f"❌ {code} 매매 기록 삭제 실패: {e}")

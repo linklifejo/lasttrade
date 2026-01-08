@@ -21,7 +21,7 @@ class MockKiwoomAPI(KiwoomAPI):
         
         # 마지막 가격 업데이트 시간
         self.last_price_update_time = 0
-        self.price_update_interval = 1.0  # 1초마다 업데이트
+        self.price_update_interval = 0.2  # 0.2초마다 업데이트 (더 생동감 있는 시뮬레이션)
         
         # [미체결 주문 추적] Mock 모드에서도 미체결 주문 관리
         self.outstanding_orders = []  # 미체결 주문 리스트
