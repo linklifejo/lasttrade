@@ -89,6 +89,18 @@ class SettingsValidator:
 			'min': -100.0,
 			'max': -0.1,
 			'description': '손절 기준 (-100% ~ -0.1%)'
+		},
+		'time_cut_minutes': {
+			'type': (int, float),
+			'min': 0,
+			'max': 1440,
+			'description': '타임컷 대기 시간 (분)'
+		},
+		'time_cut_profit': {
+			'type': (int, float),
+			'min': -100.0,
+			'max': 100.0,
+			'description': '타임컷 기준 수익률 (%)'
 		}
 	}
 	

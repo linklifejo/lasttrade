@@ -531,11 +531,23 @@ class MainApp:
 			curr_s += w
 			cumulative_ratios.append(curr_s / total_weight)
 			
-		# 추정 자산 총액
+		# [Stable Basis] 원금 기준 자산 추정 (UI 단계 고정용)
+		temp_pur_sum = 0
 		temp_eval_sum = 0
 		if current_stocks:
 			for s in current_stocks:
 				try:
+					# 매입금액 합계
+					p_val = 0
+					p_raw = str(s.get('pchs_amt', s.get('pur_amt', '0'))).replace(',', '')
+					if p_raw != '0': p_val = int(float(p_raw))
+					else:
+						qty = int(float(str(s.get('rmnd_qty', '0')).replace(',','')))
+						avg = float(str(s.get('pchs_avg_pric', s.get('avg_prc','0'))).replace(',',''))
+						p_val = int(qty * avg)
+					temp_pur_sum += p_val
+
+					# 평가금액 합계
 					val = int(float(str(s.get('evlu_amt', '0')).replace(',','')))
 					if val == 0: 
 						prc = int(float(str(s.get('cur_prc', '0')).replace(',','')))
@@ -544,14 +556,18 @@ class MainApp:
 					temp_eval_sum += val
 				except: pass
 		
-		total_asset_est = deposit + temp_eval_sum
+		# 유저 요청: 원금 기준(Principal Basis)으로 단계 계산 고정
+		total_asset_basis = deposit + temp_pur_sum
+		total_asset_est = deposit + temp_eval_sum # 실제 자산(평가금)은 별도 보관
 
 		# 실제 매수 로직과 동일하게 배정 금액 계산 (UI 표시용)
-		capital_ratio = float(get_setting('trading_capital_ratio', 80)) / 100.0
+		capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
+
 		if int(target_cnt) == 1:
-			alloc_per_stock = total_asset_est * 0.98
+			alloc_per_stock = total_asset_basis * 0.98
 		else:
-			alloc_per_stock = (total_asset_est * capital_ratio) / target_cnt
+			alloc_per_stock = (total_asset_basis * capital_ratio) / target_cnt
+
 		
 		# 분무점 유연성 보정 (95% -> 100% 근사)
 		if alloc_per_stock <= 0: alloc_per_stock = 1
@@ -675,12 +691,12 @@ class MainApp:
 						pl_rt = float(rt_str)
 					except: pass
 
-					# API 수익률이 0이면 직접 계산
-					if pl_rt == 0.0 and pur_amt > 0:
-						pl_rt = ((evlt_amt - pur_amt) / pur_amt) * 100
+					# API 수익률이 0이거나 사용자가 강제 재계산을 원할 경우 (현재가/평단가 기준)
+					if (pl_rt == 0.0 or True) and avg_prc > 0 and cur_prc > 0:
+						pl_rt = ((cur_prc - avg_prc) / avg_prc) * 100
 					
-					# [Safety] 현재가 0원(데이터 오류)이면 수익률도 0% 처리 (잘못된 물타기/손절 방지)
-					if cur_prc <= 0 or pl_rt < -90.0:
+					# [Safety] 현재가 0원(데이터 오류)이면 수익률도 0% 처리
+					if cur_prc <= 0:
 						pl_rt = 0.0
 						
 					item['pl_rt'] = f"{pl_rt:.2f}"
@@ -697,50 +713,39 @@ class MainApp:
 					s_cnt = int(float(get_setting('split_buy_cnt', 5))) # 분할 횟수
 					
 					f_step = 0
-					if strategy_rate_val > 0:
-						if 'WATER' in st_strategy and pl_rt <= -strategy_rate_val:
-							f_step = int(abs(pl_rt) / strategy_rate_val)
-						elif 'FIRE' in st_strategy and pl_rt >= strategy_rate_val:
-							f_step = int(pl_rt / strategy_rate_val)
+					# [UI Step Calculation Fix] 1:1:2:4:8 원칙 및 소액 보정 일원화
+					# check_n_buy.py에서 실시간 계산된 'current_step'이 있으면 우선 사용 (정밀도)
+					computed_step = 0
 					
-					# [수량 기반 단계 추정] (소액 계좌 및 1:1:2:4:8 전략에 최적화)
-					# 1차: 1주 (기본)
-					# 2차: 2주 (1+1)
-					# 3차: 4주 (1+1+2)
-					# 4차: 8주 (1+1+2+4)
-					# 5차: 16주 (1+1+2+4+8)
-					
-					ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-					
-					if qty <= 1: a_step = 1
-					elif qty <= 2: a_step = 2
-					elif qty <= 4: a_step = 3
-					elif qty <= 8: a_step = 4
-					else: a_step = 5
-					
-					# 예외: 만약 사용자 할당금이 아주 커서 1차 매수가 10주라면?
-					# 그때는 비율 로직을 보조로 사용 (대체 로직)
-					if alloc_per_stock > 200000: # 종목당 20만원 이상 할당 시에만 비율 로직 체크
-						for i, th in enumerate(cumulative_ratios):
-							if ratio >= (th * 0.85): 
-								a_step = max(a_step, i + 1)
-							else: break
-					
-					# 최종 단계 = 수익률 기준(f_step)과 금액 기준(a_step) 중 큰 것 + 기본 진입(1)
-					# 신규 진입 시 0이 아니라 1부터 시작하도록 보정
-					computed_step = a_step
-					if computed_step < 1: computed_step = 1
-					
-					# [UI Labeling]
-					m_str = "물타기" if 'WATER' in st_strategy else "불타기"
-					if computed_step <= 1:
-						step_str = "1차(진입)"
+					if 'current_step' in s:
+						computed_step = int(s['current_step'])
 					else:
-						step_str = f"{m_str} {computed_step}차"
+						# [Fixed Logic] database_helpers와 동일한 로직 적용
+						if alloc_per_stock < 50000:
+							# 소액 계좌: 최소 매수금 단위 물리적 단계
+							min_val = get_setting('min_purchase_amount', 2000)
+							try: min_amt = float(str(min_val).replace(',', ''))
+							except: min_amt = 2000
+							if min_amt <= 0: min_amt = 2000
+							import math
+							computed_step = int(math.ceil(pur_amt / min_amt))
+						else:
+							# 일반 계좌: 비율 기반 단계 판독
+							# ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0 (이미 위에서 계산됨)
+							for i, threshold in enumerate(cumulative_ratios):
+								if ratio >= (threshold * 0.7):
+									computed_step = i + 1
 					
-					# [Fix] MAX 표시 부활
+					if computed_step == 0: computed_step = 1
+					display_step = computed_step if computed_step <= s_cnt else s_cnt
+
+					
+					# [UI Labeling] Simplification ('1차', '2차'...)
+					step_str = f"{computed_step}차"
+					
+					# [Fix] MAX 표시 부활 (실제 s_cnt 도달 시 정보 제공용)
 					if computed_step >= s_cnt:
-						step_str = f"{m_str} {computed_step}차(MAX)"
+						step_str = f"{computed_step}차(MAX)"
 					
 					item['watering_step'] = step_str
 					

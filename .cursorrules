@@ -4,11 +4,12 @@
 2. **[CRITICAL] Master Principles Learning**: 모든 AI 모델은 작업을 시작하기 전 반드시 **`LASTTRADE_PRINCIPLES.md`** 문서를 완독하고 학습해야 한다. 이 문서에 정의된 시스템 개발 대원칙은 모든 코드 수정, 전략 제안, 로직 설계의 최상위 헌법이며 절대적인 기준이다. 대원칙과 충돌하는 모든 코딩은 엄격히 금지된다.
 3. **Language**: Always communicate in Korean (한글로 대화).
 4. **Precision**: 수정을 아주 세심하게 요구내용만 한다. 논리적 비약이 있거나 불확실하면 반드시 질문한다.
-5. **Identity & Library Integrity**:
+5. **[CRITICAL] No Hardcoding**: 시스템 제어 변수(비율, 금액, 횟수 등)는 반드시 **DB 설정값(`get_setting`)**을 사용해야 하며, 코드 내 상수는 엄격히 금지된다.
+6. **Identity & Library Integrity**:
     - 본 시스템은 대외적으로 '키움 REST API'라는 명칭을 사용하나, 기술적으로는 한국투자증권(KIS)의 REST API 구조를 따르고 있다.
     - **[CRITICAL] 절대 금지: `kiwoom/` 디렉토리 내의 API 라이브러리 파일들(`real_api.py` 등)은 절대로 수정하지 않는다.**
 6. **Trading Strategy Continuity**:
-    - **1:1:2:2:4 수열**: 추가매수 가중치 수열(1:1:2:2:4)은 자금 관리의 사활이 걸린 원칙이다.
+    - **1:1:2:4:8 수열**: 추가매수 가중치 수열(1:1:2:4:8)은 자금 관리의 사활이 걸린 원칙이다.
     - **WATER 전략**: 추가매수의 기본은 물타기(WATER)이며, 5단계 매입 완료(MAX) 후의 리스크 관리(손절) 원칙을 철저히 감시하고 준수한다.
 7. **Mathematical Engine Alignment**: `math_analyzer.py`와 `learn_daily.py`는 `LASTTRADE_PRINCIPLES.md`에 정의된 핵심 팩터를 기반으로만 분석/학습해야 하며, 제외된 팩터(RSI 등)에 가중치를 두지 않는다.
 8. **Git & Approval**: 사용자가 "처리해라", "커밋해라", "완료" 등의 명시적인 요청을 할 때만 Git에 반영하며, 수정 전 "수정할까요?"라고 질문하여 승인을 얻는다.

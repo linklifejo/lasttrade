@@ -24,7 +24,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 	try: TP_RATE = float(cached_setting('take_profit_rate', 10.0))
 	except: TP_RATE = 10.0
 	
-	try: SL_RATE = float(cached_setting('stop_loss_rate', -1.0))
+	try: 
+		SL_RATE = float(cached_setting('stop_loss_rate', -1.0))
+		if SL_RATE > 0: SL_RATE = -SL_RATE # [Fix] 손절률은 항상 음수여야 함
 	except: SL_RATE = -1.0
 	
 	# 트레일링 스탑
@@ -39,7 +41,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 	
 	# 일반 설정
 	target_cnt = float(cached_setting('target_stock_count', 1))
-	single_strategy = cached_setting('single_stock_strategy', 'WATER')
+	# [Robust] 대소문자 구분 없이 처리
+	single_strategy = str(cached_setting('single_stock_strategy', 'WATER')).upper()
+
 	split_buy_cnt = int(cached_setting('split_buy_cnt', 5)) # 기본값 5
 	if target_cnt < 1: target_cnt = 1
 
@@ -104,10 +108,25 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			logger.warning("[안전장치 발동] 총 자산이 0원으로 조회되어 매도 로직을 건너뜜")
 			return True, [], [normalize_stock_code(s['stk_cd']) for s in my_stocks], {}
 		
-		# 할당금액 계산
+		# 할당금액 계산 (안정성을 위해 원금 기반 할당액 사용)
+		# 유저 요청: 평가금 변동에 따른 단계 출렁임 방지
+		# [Fix] total_buy_principal pre-calculation logic
+		total_buy_principal = 0
+		for s in my_stocks:
+			try:
+				p_amt = float(s.get('pchs_amt', s.get('pur_amt', 0)))
+				if p_amt == 0:
+					qty = int(s.get('rmnd_qty', 0))
+					avg = float(s.get('pchs_avg_pric', s.get('avg_prc', 0)))
+					p_amt = qty * avg
+				total_buy_principal += p_amt
+			except: pass
+
+		principal_basis = deposit_amt + total_buy_principal
 		capital_ratio = float(cached_setting('trading_capital_ratio', 70)) / 100.0
-		alloc_per_stock = (net_asset * capital_ratio) / target_cnt
+		alloc_per_stock = (principal_basis * capital_ratio) / target_cnt
 		if alloc_per_stock <= 0: alloc_per_stock = 1
+
 		
 		for stock in my_stocks:
 			stock_code = normalize_stock_code(stock['stk_cd'])
@@ -163,14 +182,17 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			if alloc_per_stock > 0:
 				# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용
 				if alloc_per_stock < 50000:
-					min_val = cached_setting('min_buy_amount', 2000)
-					try: min_amt = float(min_val)
+					# [Fix] 키 명칭 통일 (min_purchase_amount) 및 기본값 2000원 유지
+					min_val = cached_setting('min_purchase_amount', 2000)
+					try: min_amt = float(str(min_val).replace(',', ''))
 					except: min_amt = 2000
-					if min_amt <= 0: min_amt = 2000
+					if min_amt < 100: min_amt = 2000 # 너무 작은 값 방지 (버그 방어)
 					
 					import math
 					cur_step = int(math.ceil(pchs_amt / min_amt))
+					if cur_step > split_buy_cnt: cur_step = split_buy_cnt
 					if cur_step < 1: cur_step = 1
+
 				else:
 					for i, ratio in enumerate(cumulative_ratios):
 						# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
@@ -181,7 +203,13 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# [진짜 수정] 금액 비율(Ratio) 기반 MAX 판정 (UI와 동기화)
 			# 금액이 할당량의 70% 이상이면, 설령 계산상 4차라도 MAX(5차) 급으로 간주하여 손절/익절 로직 적용
 			filled_ratio = pchs_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-			is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.70)
+			# [Stable MAX logic] 
+			# filled_ratio 임계값을 상향(0.7->0.95)하여 조금 더 여유를 줌
+			qty = int(stock.get('rmnd_qty', 0))
+			is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.95)
+			# [Fix] 1주만 보유한 경우(qty=1), 예산상으로는 MAX더라도 전략상 '초동'으로 보아 손절 유예 대상이 됨
+			is_actually_max = is_max_bought and (qty > 1 or single_strategy != "WATER")
+
 
 			# [Time-Cut 로직]
 			if held_since and stock_code in held_since:
@@ -217,30 +245,22 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						sell_reason = f"TrailingStop({display_step_str})"
 						logger.info(f"🛡️ [LASTTRADE TS] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (익절 수익률: {pl_rt}%)")
 
-			# 2. [물타기(WATER) 전략 특수 손절 로직]
-			# 대원칙: 물타기 중에는 버티되, MAX 도달 시에는 확실하게 자른다.
+			# 2. [물타기(WATER) 전략 특수 로직]
 			if not should_sell and single_strategy == "WATER":
-				# [수정] MAX 혹은 MAX 바로 전 단계(4차)에서도 손절선(-3%) 닿으면 조기 탈출
-				# "굳이 5차(최대)까지 가서 손해 볼 필요 없다"는 사용자 철학 반영
-				# 조건: (MAX 상태) 또는 (MAX-1 단계 and 비중 어느정도 찼을 때)
-				check_stop_loss = is_max_bought or (cur_step >= split_buy_cnt - 1)
-				
-				if check_stop_loss:
-					# [MAX/조기 손절] 마틴게일 방어선(-2%) + 사용자 설정 손절선(SL_RATE, 음수)
-					# 예: SL_RATE가 -1%이면 -> -2% + (-1%) = -3%
-					MAX_SL_TARGET = -2.0 + SL_RATE
+				# [조기 손절 (Early Stop)]
+				# 원칙: 4차 매수 시 평단가는 -2% 수준으로 수렴함 (사용자 정의)
+				# 여기서 '개별종목손절률'만큼 더 하락하면 5차(MAX) 진입 전 전량 손절
+				if cur_step == (split_buy_cnt - 1):
+					# 조기 손절 타겟 = -2.0% (4차 수렴 평단) - 개별종목손절률 (무조건 추가 하락분으로 처리)
+					# Dashboard의 손절률이 3(%)이면 -2 - 3 = -5%에서 매도
+					early_stop_target = -2.0 - abs(SL_RATE)
 					
-					if pl_rt <= MAX_SL_TARGET:
+					if pl_rt <= early_stop_target:
 						should_sell = True
-						sell_reason = "MAX손절(-3%)"
-						logger.warning(f"🚫 [손절(MAX)] {stock_name}: MAX 매수 후 손절선({MAX_SL_TARGET}%) 이탈 -> 전량 매도 (현재:{pl_rt}%)")
-				
-				# (옵션) 물타기 중이라도 너무 심한 손실(-6%)은 끊어줌
-				# (예수금 부족으로 추가 매수를 못 해서 평단 관리가 안 되는 경우 등)
-				elif pl_rt <= -6.0:
-					should_sell = True
-					sell_reason = "재난손절(-6%)"
-					logger.warning(f"💀 [재난 손절] {stock_name}: 손실 확대(-6%) 및 추가매수 불가 판단 -> 강제 청산")
+						sell_reason = f"조기손절({cur_step}차)"
+						logger.warning(f"✂️ [조기 손절] {stock_name}: 4차 수렴선(-2%) 대비 추가 하락({SL_RATE}%) 발생 -> 5차(MAX) 차단 (타겟:{early_stop_target}%, 현재:{pl_rt}%)")
+
+
 
 			# 3. [상한가 매도]
 			if not should_sell:
@@ -253,17 +273,22 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					logger.info(f"🚀 [LASTTRADE 상한가] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도")
 
 			# 4. [일반 익절/손절]
+			# [원칙] WATER 전략에서는 1주(초기 진입) 상태에서 바로 손절을 나가지 않고 물타기를 기다립니다.
 			if not should_sell:
 				if pl_rt >= TP_RATE:
 					should_sell = True
 					sell_reason = f"익절({cur_step}차)"
 				elif pl_rt <= SL_RATE:
-					# WATER 전략: 물타기 진행 중(1~4차)에는 손절하지 않고 버팀.
-					# 단, MAX(5차) 도달 후에도 손절선 아래면 매도. FIRE 전략은 즉시 매도.
-					if single_strategy == "FIRE" or is_max_bought:
+					# [원칙] WATER 전략은 일반 손절을 사용하지 않습니다. (사용자 요청: 삭제)
+					# 오직 FIRE 전략이거나 다른 특수 전략에서만 작동합니다.
+					if single_strategy != "WATER":
 						should_sell = True
 						sell_reason = f"손절({cur_step}차)"
-						logger.warning(f"📉 [StopLoss] {stock_name}: 수익률 {pl_rt}% <= 손절선 {SL_RATE}% -> 손절 진행")
+					else:
+						# WATER 전략은 조기손절(Early Stop) 또는 고점 대비 하락(Trailing Stop)으로만 제어
+						pass
+
+
 
 			# --------------------------------------------------------------------------------
 			# [매도 실행]

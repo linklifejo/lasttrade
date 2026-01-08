@@ -453,6 +453,8 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 
 	expense = 0
 	msg_reason = ""
+	filled_ratio = 0.0 # [Fix] UnboundLocalError 방지
+
     
     # [보정] 현재 매입 금액 계산 (API 지연 감안하여 내부 추적값과 비교, 큰 값 사용)
 	accum_amt = accumulated_purchase_amt.get(stk_cd, 0)
@@ -568,11 +570,25 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
 		# [Step Calc] 1:1:2:4:8 비중 기반 정밀 단계 판독
-		actual_current_step = 1
-		for i, ratio in enumerate(cumulative_ratios):
-			# 현재 매입 비중이 누적 비중의 70% 이상 채워졌다면 해당 단계로 기민하게 인정
-			if filled_ratio >= (ratio * 0.7):
-				actual_current_step = i + 1
+		actual_current_step = 0
+		
+		# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용 (보정 기준 5만원)
+		if alloc_per_stock < 50000:
+			min_val = get_setting('min_purchase_amount', 2000)
+			try: min_amt = float(str(min_val).replace(',', ''))
+			except: min_amt = 2000
+			if min_amt <= 0: min_amt = 2000
+			
+			import math
+			actual_current_step = int(math.ceil(cur_pchs_amt / min_amt))
+		else:
+			# 일반 비율 기반 단계
+			for i, ratio in enumerate(cumulative_ratios):
+				# 현재 매입 비중이 누적 비중의 70% 이상 채워졌다면 해당 단계로 기민하게 인정
+				if filled_ratio >= (ratio * 0.7):
+					actual_current_step = i + 1
+		
+		if actual_current_step == 0: actual_current_step = 1
 		
 		# [UI Sync]
 		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt

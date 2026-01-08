@@ -336,15 +336,32 @@ def get_current_status(mode='MOCK'):
 					principal_basis = deposit + total_buy_principal # 평가손익을 제외한 원금 기준 자산
 					capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
 					target_stocks = float(get_setting('target_stock_count', 5))
-					alloc_per_stock = (principal_basis * capital_ratio) / target_stocks if target_stocks > 0 else 1
+					
+					if int(target_stocks) == 1:
+						alloc_per_stock = principal_basis * 0.98
+					else:
+						alloc_per_stock = (principal_basis * capital_ratio) / target_stocks if target_stocks > 0 else 1
 					
 					actual_step = 0
-					ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-					for i, threshold in enumerate(cumulative_ratios):
-						if ratio >= (threshold * 0.7): # 70% 이상 채워지면 해당 단계로 기민하게 인정
-							actual_step = i + 1
+					
+					# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용 (보정 기준 5만원)
+					if alloc_per_stock < 50000:
+						min_val = get_setting('min_purchase_amount', 2000)
+						try: min_amt = float(str(min_val).replace(',', ''))
+						except: min_amt = 2000
+						if min_amt <= 0: min_amt = 2000
+						
+						import math
+						actual_step = int(math.ceil(pur_amt / min_amt))
+					else:
+						# 일반 비율 기반 단계
+						ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+						for i, threshold in enumerate(cumulative_ratios):
+							if ratio >= (threshold * 0.7): # 70% 이상 채워지면 해당 단계로 기민하게 인정
+								actual_step = i + 1
 					
 					display_step = actual_step if actual_step <= s_cnt else s_cnt
+
 					if display_step == 0: display_step = 1
 					
 					step_str = f"{display_step}차"
@@ -469,17 +486,28 @@ def get_current_status(mode='MOCK'):
 									cumulative_ratios.append(curr_s / tw)
 								
 								step_idx = 0
-								# [Stable Fix] alloc_per_stock이 principal_basis 기반이므로 출렁이지 않음
-								ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-								for i, threshold in enumerate(cumulative_ratios):
-									if ratio >= (threshold * 0.7):
-										step_idx = i + 1
+								# [소액 보정] 할당액이 적으면 물리적 단계 적용
+								if alloc_per_stock < 50000:
+									min_val = get_setting('min_purchase_amount', 2000)
+									try: min_amt = float(str(min_val).replace(',', ''))
+									except: min_amt = 2000
+									if min_amt <= 0: min_amt = 2000
+									import math
+									step_idx = int(math.ceil(pur_amt / min_amt))
+								else:
+									# [Stable Fix] alloc_per_stock이 principal_basis 기반이므로 출렁이지 않음
+									ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+									for i, threshold in enumerate(cumulative_ratios):
+										if ratio >= (threshold * 0.7):
+											step_idx = i + 1
 								
 								if step_idx == 0: step_idx = 1
-								step_str = f"{step_idx}차"
-								if step_idx >= split_buy_cnt_val: step_str += "(MAX)"
+								display_step = step_idx if step_idx <= split_buy_cnt_val else split_buy_cnt_val
+								step_str = f"{display_step}차"
+								if display_step >= split_buy_cnt_val: step_str += "(MAX)"
 							except:
 								step_str = "보유중"
+
 
 
 							holdings.append({
