@@ -187,23 +187,15 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				current_sum += w
 				cumulative_ratios.append(current_sum / total_weight)
 
-			# [Step Calc] Pure Quantity Method (사용자 직관 우선)
-			# 원칙: 1:1:2:4:8 수열 -> 합계 1, 2, 4, 8, 16...
-			import math
-			try:
-				if qty <= 1:
-					cur_step = 1
-				else:
-					cur_step = int(math.log2(qty) + 1)
-			except:
-				cur_step = 1
+			# [Step Calc] Transaction Count Method (사용자 요구: 매수 명령 횟수 = 단계)
+			mode_key = "REAL" if not cached_setting('use_mock_server', False) else "MOCK"
+			cur_step = get_watering_step_count_sync(stock_code, mode=mode_key)
 			
-			# DB 기록(매수 횟수)과 대조 및 보정
-			db_c = get_watering_step_count_sync(stock_code, mode="REAL" if not cached_setting('use_mock_server', False) else "MOCK")
-			if db_c > 0 and abs(db_c - cur_step) <= 1:
-				cur_step = db_c
-			elif qty <= 1:
-				cur_step = 1 # 1주면 무조건 1차
+			if qty <= 1:
+				cur_step = 1
+			elif cur_step == 0 and qty > 0:
+				import math
+				cur_step = int(math.log2(qty) + 1)
 			
 			if cur_step < 1: cur_step = 1
 			if cur_step > split_buy_cnt: cur_step = split_buy_cnt

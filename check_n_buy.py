@@ -573,26 +573,25 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# 현재 매입 비율
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
-		# [Step Calc] Pure Quantity-Mapping Method (사용자 직관 100% 반영)
-		# 원칙: 1:1:2:4:8 수열에서 합계는 1, 2, 4, 8, 16으로 증가함
-		# 따라서 단계 = log2(현재수량 / 최초수량) + 1
-		import math
+		# [Step Calc] Transaction Count Method (사용자 요구: 매수 명령 횟수 = 단계)
+		buy_mode = "REAL"
 		try:
-			if cur_pchs_qty <= 1:
-				actual_current_step = 1
-			else:
-				# 2^n 계열로 단계를 역산 (1주->1차, 2주->2차, 4주->3차, 8주->4차, 16주->5차)
-				actual_current_step = int(math.log2(cur_pchs_qty) + 1)
-		except:
-			actual_current_step = 1
+			if str(get_setting('use_mock_server', False)).lower() in ['1', 'true', 'on']: buy_mode = "MOCK"
+			elif str(get_setting('is_paper_trading', False)).lower() in ['1', 'true', 'on']: buy_mode = "PAPER"
+		except: pass
 		
-		# DB 카운트와 비교하여 더 신뢰할 수 있는 값 선택 (방어적)
-		db_count = get_watering_step_count_sync(stk_cd, buy_mode)
-		if db_count > 0 and abs(db_count - actual_current_step) <= 1:
-			# DB 기록이 있고 수량 기반 계산과 비슷하다면 DB 기록(횟수)을 존중
-			actual_current_step = db_count
-		elif cur_pchs_qty <= 1:
-			actual_current_step = 1 # 1주면 다른 거 다 무시하고 1차
+		# DB에서 매수 명령 횟수를 직접 카운트 (DISTINCT timestamp)
+		actual_current_step = get_watering_step_count_sync(stk_cd, buy_mode)
+		
+		# [절대 규칙] 1주면 무조건 1차
+		if cur_pchs_qty <= 1:
+			actual_current_step = 1
+		# DB 기록이 없으면 수량으로 추정 (fallback)
+		elif actual_current_step == 0 and cur_pchs_qty > 0:
+			import math
+			actual_current_step = int(math.log2(cur_pchs_qty) + 1)
+		
+		if actual_current_step < 1: actual_current_step = 1
 		
 		# [UI Sync]
 		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt
