@@ -11,6 +11,7 @@ import os
 import json
 from datetime import datetime
 from logger import logger
+from database_helpers import add_web_command
 
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trading.db')
 
@@ -65,6 +66,14 @@ def learn_from_today_data():
         
         conn.commit()
         conn.close()
+        
+        # 학습 완료 시각
+        learn_time = datetime.now().strftime('%H:%M:%S')
+        
+        # 대시보드 알림 (상세 정보 포함)
+        add_web_command('notify', {
+            'message': f'🤖 AI 학습 완료 [{learn_time}] - 거래: {len(trades)}건, 시그널: {len(signals)}건, 승률: {learning_results.get("win_rate_weight",0)*100:.1f}%'
+        })
         
         logger.info("✅ AI 학습 완료")
         return True
