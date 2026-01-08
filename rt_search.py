@@ -611,11 +611,13 @@ class RealTimeSearch:
 		Returns:
 			bool: 성공 여부
 		"""
+		logger.info(f"🚀 [RT_SEARCH] start() 호출됨 (Token: {str(token)[:10]}...)")
 		try:
 			# [Mock Server Support] Mock 모드인지 확인
 			from kiwoom.factory import get_api_status
 			api_status = get_api_status()
 			is_mock_mode = api_status.get('is_mock', False)
+			logger.info(f"🔍 [RT_SEARCH] 현재 모드: {'MOCK' if is_mock_mode else 'REAL'}")
 			
 			# [User Request] Local Mock(파이썬 시뮬레이터) 대신 Broker Test Server 사용
 			# 아래 코드를 주석 처리하여, 강제로 웹소켓 연결(Test Server URL) 시도
@@ -802,24 +804,26 @@ class RealTimeSearch:
 		self.buy_last_time.clear()
 		self.candidate_queue.clear()
 		try:
+			# [Fix] 초기 보유 조회 실패해도 검색은 시작할 수 있도록 분리
+			from kiwoom_adapter import get_my_stocks
 			current_stocks = get_my_stocks(token=token)
 			if current_stocks:
 				self.update_held_stocks(current_stocks)
 				logger.info(f'🎮 Mock 초기 보유: {len(self.purchased_stocks)}개')
 		except Exception as e:
-			logger.error(f'초기 보유 로드 실패: {e}')
+			logger.error(f'초기 보유 로드 실패 (무시하고 진행): {e}')
 		try:
 			self.target_cnt_cache = float(get_setting('target_stock_count', 5))
 		except:
 			self.target_cnt_cache = 5.0
 		self.receive_task = asyncio.create_task(self._mock_condition_search_loop())
-		logger.info('✅ Mock 실시간 검색 준비 완료')
+		logger.info('✅ Mock 실시간 검색 준비 완료 (Loop Task Created)')
 		return True
 	
 	async def _mock_condition_search_loop(self):
-		logger.info('🎮 [가상 서버] 조건검색 루프 시작 (매 2초)')
-		# await asyncio.sleep(5) # [Mod] 초기 대기 제거 (즉각 반응을 위해)
+		logger.info('🎮 [가상 서버] 조건검색 루프 시작 (매 2초 진동)')
 		while self.keep_running:
+			# logger.debug("🎮 [가상 서버] 루프 회전 중...")
 			# 매 루프마다 설정값 캐시 갱신
 			try:
 				self.target_cnt_cache = float(get_setting('target_stock_count', 5.0))
@@ -840,13 +844,14 @@ class RealTimeSearch:
 				]
 				# 한 번에 3~7개 발견 (더 활발하게)
 				selected = random.sample(mock_stocks, min(random.randint(3,7), len(mock_stocks)))
-				logger.info(f'🎮 Mock: {len(selected)}개 종목 발견 (빠른 매수 모드)')
+				# [로그 강화] 확실하게 로그가 남도록 함
+				logger.info(f'🎮 Mock 진동: {len(selected)}개 종목 후보군 검토 중...')
 				for code in selected:
 					if code not in self.purchased_stocks and code not in self.buying_stocks:
 						# 무조건 높은 등락률로 매수 유도
 						rate = random.uniform(3.0, 7.0)
 						self.candidate_queue[code] = rate
-						logger.info(f'🎮 {code} ({rate:.1f}%) -> 매수 대기열 등록')
+						logger.info(f'🎮 {code} ({rate:.1f}%) -> Mock 매수 대기열 등록')
 
 				# [Test] 보유 종목도 매 루프마다 검사 (물타기 테스트용)
 				for p_code in list(self.purchased_stocks):

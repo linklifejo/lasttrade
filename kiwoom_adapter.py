@@ -54,14 +54,17 @@ def get_active_api():
         current_real_key = current_real_secret = current_paper_key = current_paper_secret = None
         
     # 2. 설정이 하나라도 바뀌었으면 기존 인스턴스 파기 및 config 리로드
-    if (_last_mock_setting is not None and _last_mock_setting != current_mock_setting) or \
-       (_last_paper_setting is not None and _last_paper_setting != current_paper_setting) or \
-       (_last_account is not None and _last_account != current_account) or \
-       (_last_real_key is not None and _last_real_key != current_real_key) or \
-       (_last_real_secret is not None and _last_real_secret != current_real_secret) or \
-       (_last_paper_key is not None and _last_paper_key != current_paper_key) or \
-       (_last_paper_secret is not None and _last_paper_secret != current_paper_secret):
-        
+    # [Fix] 타입 차이(bool vs str)로 인한 무한 리부트 방지를 위해 str() 변환 후 비교
+    has_changed = False
+    if _last_mock_setting is not None and str(_last_mock_setting).upper() != str(current_mock_setting).upper(): has_changed = True
+    if _last_paper_setting is not None and str(_last_paper_setting).upper() != str(current_paper_setting).upper(): has_changed = True
+    if _last_account is not None and str(_last_account) != str(current_account): has_changed = True
+    
+    # 키 변경 감지
+    if _last_real_key is not None and str(_last_real_key) != str(current_real_key): has_changed = True
+    if _last_real_secret is not None and str(_last_real_secret) != str(current_real_secret): has_changed = True
+    
+    if has_changed:
         mode_str = "MOCK" if current_mock_setting else "REAL"
         acc_str = "모의" if current_paper_setting else "실전"
         logger.warning(f"🔄 환경/키 변경 감지: [{acc_str} 계좌 + {mode_str} API] 설정을 리로드합니다.")

@@ -167,22 +167,38 @@ class MainApp:
 		
 		# 1. 자동 시작 처리
 		# Mock 모드이거나 장중이면 자동 시작
-		if auto_start and not self.manual_stop:
-			is_mock = get_setting('use_mock_server', True)
-			
-			# [Fix] Mock 모드에서는 날짜 변경 시에도 즉시 재시작
-			if is_mock or MarketHour.is_market_open_time():
-				if not self.chat_command.rt_search.connected:
-					logger.info(f"장중 자동 시작 실행 (연결 없음) - start 명령을 실행합니다.")
-					await self.chat_command.start()
-					self.today_started = True
-				elif not self.today_started:
-					# 이미 연결되어 있는데 플래그만 꺼진 경우 (날짜 변경 등)
-					self.today_started = True
-					logger.info("날짜 변경 감지 - 장중 상태 유지")
+		# [Mod] 사용자 요청: "프로그램 시작하면 자동시작 되어야 함"
+		# 따라서 Mock 모드일 때는 manual_stop 여부와 상관없이 초기 1회는 무조건 시작 시도
+		
+		# [Fix] 인자값 무시하고 DB 설정값 강제 로드 (확실한 자동시작)
+		auto_start = get_setting('auto_start', False)
+		
+		# [Debug] 콘솔 출력으로 원인 파악
+		is_mock = get_setting('use_mock_server', True)
+		target_condition = (is_mock or MarketHour.is_market_open_time())
+		
+		logger.info(f"🤖 [AutoStart Debug] auto_start={auto_start}, is_mock={is_mock}, target={target_condition}, manual_stop={self.manual_stop}")
+		
+		if auto_start and target_condition:
+			logger.info(f"🚀 [AutoStart Debug] connected={self.chat_command.rt_search.connected}, today_started={self.today_started}")
+			if not self.chat_command.rt_search.connected:
+				logger.info(f"🚀 자동 시작 조건 만족 (Mock={is_mock}) - start 명령 실행")
+				success = await self.chat_command.start()
+				if success:
+					self.today_started = True 
+					self.manual_stop = False
+					logger.info("✅ [AutoStart] start() 명령 실행 완료")
+				else:
+					logger.info("❌ [AutoStart] start() 명령 실행 실패 (다음 루프 재시도)")
+			elif not self.today_started:
+				self.today_started = True
+				logger.info("ℹ️ [AutoStart] 이미 실행 중임 (상태 동기화)")
+		else:
+			if not self.today_started:
+				logger.info("💤 [AutoStart] 조건 불만족. 대기합니다.")
 			
 			# 장전인데 아직 플래그가 안 켜졌으면 (로그 출력용)
-			elif not self.today_started:
+			if not self.today_started:
 				logger.info(f"자동 시작 대기 중 - 장 시작 시 자동으로 연결됩니다.")
 				self.today_started = True # 메시지 중복 방지용
 		
@@ -518,14 +534,17 @@ class MainApp:
 		# 설정 로드
 		target_cnt = float(get_setting('target_stock_count', 1)) 
 		if target_cnt < 1: target_cnt = 1
-		split_cnt = int(float(get_setting('split_buy_cnt', 5)))
 		
-		# 분할 매수 비율 계산 (시각화용)
+		# [Sync] 1:1:2:4:8 가중치 기반 단계 계산
+		s_cnt = int(get_setting('split_buy_cnt', 5))
+		st_mode = get_setting('single_stock_strategy', 'WATER').upper()
+		
 		weights = []
-		for i in range(split_cnt):
-			if i < 2: weights.append(1)
-			else: weights.append(weights[-1] * 2)
-		total_weight = sum(weights)
+		for i in range(s_cnt):
+			if i == 0: weights.append(1)
+			else: weights.append(2**(i - 1))
+		total_weight = sum(weights) # Renamed from 'tw' to 'total_weight' for consistency with original code structure
+		
 		cumulative_ratios = []
 		curr_s = 0
 		for w in weights:
@@ -729,10 +748,10 @@ class MainApp:
 						elif str(get_setting('is_paper_trading', False)).lower() in ['1', 'true', 'on']: cur_st_mode = "PAPER"
 					except: pass
 
-					# DB 기록과 대조 보정
+					# DB 기록 참고 (로그용)
 					db_cnt = get_watering_step_count_sync(code, cur_st_mode)
-					if db_cnt > 0 and abs(db_cnt - computed_step) <= 1:
-						computed_step = db_cnt
+					if db_cnt > 0 and db_cnt != computed_step:
+						logger.debug(f"[Step] {code}: 수량기반={computed_step}차, DB기록={db_cnt}회 (수량 우선)")
 					
 					if qty <= 1: computed_step = 1 # 최종 가드
 					display_step = computed_step if computed_step <= s_cnt else s_cnt
@@ -878,7 +897,15 @@ class MainApp:
 					self.held_since.clear()
 					self.chat_command.rt_search.purchased_stocks.clear()
 					reset_accumulation_global()
-					logger.info("⚠️ API 모드 변경으로 인해 내부 보유 목록 및 추적 데이터를 초기화했습니다.")
+					
+					# [Restart Fix] 기존의 낡은 연결/루프가 남아 '어리버리'하게 작동하는 것 방지
+					# 엔진을 강제로 중지시키면, 다음 check_market_timing()에서 새로운 모드로 start()가 트리거됨
+					# today_started를 False로 하여 새 모드에서의 시작 보고서도 다시 보내게 함
+					logger.warning(f"🔄 [{current_api_mode}] 환경으로 재배치 중... 기존 엔진을 종료합니다.")
+					await self.chat_command.stop(set_auto_start_false=False)
+					self.today_started = False 
+					
+					logger.info("⚠️ API 모드 변경으로 인해 내부 데이터가 초기화되었으며, 곧 새로운 모드로 재시작됩니다.")
 				
 				# 채팅 메시지 확인
 				message = await self.get_chat_updates()

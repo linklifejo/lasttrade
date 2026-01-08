@@ -162,6 +162,10 @@ class ChatCommand:
 	
 	async def start(self):
 		"""start 명령어를 처리합니다."""
+		if self.rt_search.connected:
+			logger.info("이미 실시간 검색이 실행 중입니다. 중복 시작을 건너뜁니다.")
+			return True
+			
 		try:
 			# 기존 check_n_sell 태스크가 실행 중이면 정지
 			if self.check_n_sell_task and not self.check_n_sell_task.done():
@@ -179,14 +183,19 @@ class ChatCommand:
 				return False
 			
 			# auto_start를 true로 설정
-			if not self.update_setting('auto_start', True):
-				tel_send("❌ 설정 파일 업데이트 실패")
-				return False
+			self.update_setting('auto_start', True)
+			from database_helpers import set_bot_running
+			set_bot_running(True) # 봇이 일단 의지를 가졌으므로 실행 중으로 표시
 			
-			# 장이 열리지 않았을 때는 auto_start만 설정하고 메시지 전송
-			if not MarketHour.is_market_open_time():
+			# [Fix] Mock 모드라면 장 시간과 무관하게 통과
+			from market_hour import MarketHour
+			is_mock_mode = MarketHour._is_mock_mode()
+			
+			if not MarketHour.is_market_open_time() and not is_mock_mode:
 				tel_send(f"⏰ 장이 열리지 않았습니다. 장 시작 시간({MarketHour.MARKET_START_HOUR:02d}:{MarketHour.MARKET_START_MINUTE:02d})에 자동으로 시작됩니다.")
 				return True
+			elif is_mock_mode:
+				logger.info("🎮 Mock 모드 - 장 시간과 무관하게 즉시 시작합니다.")
 			
 			# WebSocket 연결 재시도 로직
 			max_retries = 5  # 최대 재시도 횟수

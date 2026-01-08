@@ -3,7 +3,7 @@ import math
 import json
 import datetime
 import threading # [Lock] 동시성 제어 추가
-from kiwoom_adapter import fn_kt00001, fn_ka10004, fn_kt10000, fn_kt00004, get_total_eval_amt
+from kiwoom_adapter import fn_kt00001, fn_ka10004, fn_kt10000, fn_kt00004, get_total_eval_amt, get_current_api_mode
 from tel_send import tel_send
 from get_setting import get_setting
 from logger import logger
@@ -162,12 +162,15 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		import datetime
 		today_str = datetime.date.today().strftime('%Y-%m-%d')
 		
+		# [Mode Fix] 현재 API 모드에 맞는 기록만 조회
+		current_mode = get_current_api_mode().upper()
+		
 		# DB에서 오늘 순매수(매수-매도 > 0)인 종목들 조회
 		# (단, API 잔고에 이미 있는 건 제외)
 		with get_db_connection() as conn:
 			rows = conn.execute(
-				"SELECT code, type, qty FROM trades WHERE timestamp LIKE ?", 
-				(f"{today_str}%",)
+				"SELECT code, type, qty FROM trades WHERE mode = ? AND timestamp LIKE ?", 
+				(current_mode, f"{today_str}%",)
 			).fetchall()
 			
 			db_calc_holdings = {}
@@ -856,7 +859,6 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	# [매매 로그 DB 저장]
 	try:
 		from database_trading_log import log_buy_to_db
-		from kiwoom_adapter import get_current_api_mode
 		mode = get_current_api_mode().upper()  # "Mock" -> "MOCK"
 		log_buy_to_db(stk_cd, stock_name, ord_qty, bid, mode)
 	except Exception as e:
@@ -879,7 +881,6 @@ def reset_accumulation(stk_cd):
 	# 2. DB 초기화 (중요: 재매수 시 1차부터 시작하도록 trades 테이블 정리)
 	try:
 		from database_trading_log import delete_stock_trades
-		from kiwoom_adapter import get_current_api_mode
 		mode = get_current_api_mode().upper()
 		delete_stock_trades(stk_cd, mode)
 	except Exception as e:

@@ -202,7 +202,7 @@ async def get_sell_log():
         else:
             mode = "PAPER" if is_paper else "REAL"
         
-        logger.info(f"📊 [API/sell-log] 모드 감지: {mode} (use_mock={use_mock}, is_paper={is_paper})")
+        logger.debug(f"📊 [API/sell-log] 모드 감지: {mode} (use_mock={use_mock}, is_paper={is_paper})")
         
         # DB에서 매도 내역만 조회 (오늘 날짜만)
         import datetime
@@ -236,7 +236,7 @@ async def get_trading_log(since_id: int = 0):
         else:
             mode = "PAPER" if is_paper else "REAL"
         
-        logger.info(f"📊 [API/trading-log] 모드 감지: {mode} (use_mock={use_mock}, is_paper={is_paper})")
+        logger.debug(f"📊 [API/trading-log] 모드 감지: {mode} (use_mock={use_mock}, is_paper={is_paper})")
         
         import datetime
         today_str = datetime.datetime.now().strftime('%Y-%m-%d')

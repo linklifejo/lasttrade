@@ -331,26 +331,24 @@ def get_current_status(mode='MOCK'):
 						cumulative_ratios.append(curr_s / tw)
 					
 					# [Step Calc] Transaction Count Method (매수 명령 횟수 = 단계)
-				# 마지막 매도 이후 매수 횟수를 세어 단계 결정 (1번=1차, 2번=2차...)
-				try:
-					cursor = conn.execute('''
-						SELECT COUNT(*) FROM trades 
-						WHERE mode = ? AND code = ? AND type = 'buy'
-						AND timestamp > (
-							SELECT COALESCE(MAX(timestamp), '2000-01-01') 
-							FROM trades 
-							WHERE mode = ? AND code = ? AND type = 'sell'
-						)
-					''', (mode, code, mode, code))
-					actual_step = int(cursor.fetchone()[0])
-					if actual_step < 1:
+					# 마지막 매도 이후 매수 횟수를 세어 단계 결정 (1번=1차, 2번=2차...)
+					try:
+						cursor_step = conn.execute('''
+							SELECT COUNT(*) FROM trades 
+							WHERE mode = ? AND code = ? AND type = 'buy'
+							AND timestamp > (
+								SELECT COALESCE(MAX(timestamp), '2000-01-01') 
+								FROM trades 
+								WHERE mode = ? AND code = ? AND type = 'sell'
+							)
+						''', (mode, code, mode, code))
+						actual_step = int(cursor_step.fetchone()[0])
+						if actual_step < 1:
+							actual_step = 1
+					except:
 						actual_step = 1
-				except:
-					actual_step = 1
 
-					
 					display_step = actual_step if actual_step <= s_cnt else s_cnt
-
 					if display_step == 0: display_step = 1
 					
 					step_str = f"{display_step}차"
@@ -501,7 +499,19 @@ def get_current_status(mode='MOCK'):
 					traceback.print_exc()
 
 
-			total_yield = (total_pl / total_buy * 100) if total_buy > 0 else 0
+			# [Fix] 수익률 계산 로직 (공통)
+			# HTS와 일치시키기 위해 '실현손익'이 아닌 '평가손익' 기준
+			current_eval_profit = 0
+			if mode == 'MOCK':
+				current_eval_profit = total_pl
+			else:
+				# Real 모드: 총평가금 - 총매입금
+				try:
+					current_eval_profit = total_eval_stocks - total_buy
+				except:
+					current_eval_profit = 0
+
+			total_yield = (current_eval_profit / total_buy * 100) if total_buy > 0 else 0
 			
 			# 봇 실행 상태 조회
 			bot_running = get_bot_running()

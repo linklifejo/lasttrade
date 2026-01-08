@@ -171,7 +171,8 @@ class MockKiwoomAPI(KiwoomAPI):
                     holdings_val += qty * current
                 
                 total_eval = cash + holdings_val
-                logger.info(f"🎮 Mock 계좌 잔고 - 현금: {cash:,}, 보유평가: {holdings_val:,}, 총평가: {total_eval:,}")
+                # [Optimization] 매번 찍히는 잔고 로그를 debug로 변경하여 로그 폭주 방지
+                logger.debug(f"🎮 Mock 계좌 잔고 - 현금: {cash:,}, 보유평가: {holdings_val:,}, 총평가: {total_eval:,}")
                 return cash, total_eval, cash
         except Exception as e:
             logger.error(f"🎮 Mock 잔고 조회 실패: {e}")

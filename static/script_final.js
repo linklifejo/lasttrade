@@ -7,6 +7,7 @@
 // --- Global State Management ---
 // [수정] 삭제는 세션 내에서만 유지, 새로고침하면 복구됨
 let deletedTimeCutIds = [];
+let isInitialStatusLoaded = false; // [New] 초기 상태 로드 플래그
 
 // [Helper] 타임컷 여부 판별 함수 (사유 기반)
 const isTCFunc = (s) => /TimeCut|시간|지루|Cut|시간제한/i.test(s.reason || '');
@@ -118,7 +119,10 @@ async function fetchStatus() {
 
         if (statusData && !statusData.error) {
             updateDashboard(statusData);
-            addLog('초기 상태 로드 완료', 'success');
+            if (!isInitialStatusLoaded) {
+                addLog('초기 상태 로드 완료', 'success');
+                isInitialStatusLoaded = true;
+            }
         }
         if (logData && !logData.error) {
             // Assuming there's a function to update logs, e.g., updateLogsTable(logData.logs)

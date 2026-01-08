@@ -41,11 +41,12 @@ class MarketHour:
 	def _is_mock_mode():
 		"""Mock Server 모드인지 확인합니다."""
 		try:
-			from get_setting import get_setting
+			# [Rollback] SQLite 직접 연결 제거 (Lock 문제 해결)
+			# 함수 내부 Import로 순환 참조 회피
+			from database_helpers import get_setting
 			return get_setting('use_mock_server', True)
-		except:
-			pass
-		return False
+		except Exception:
+			return True # 안전하게 Mock 모드로 간주
 	
 	@staticmethod
 	def _is_weekday():
