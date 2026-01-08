@@ -14,7 +14,8 @@ from file_utils import safe_write_json, safe_read_json
 
 from get_setting import get_setting
 from market_hour import MarketHour
-from database import init_db, log_asset_history, log_price_history
+from database import init_db, log_asset_history, log_price_history, get_watering_step_count_sync
+
 from database_helpers import save_system_status, get_pending_web_command, mark_web_command_completed
 # from dashboard import run_dashboard_server # Subprocess로 실행됨
 # [Mock Server Integration] Use kiwoom_adapter for automatic Real/Mock API switching
@@ -713,35 +714,27 @@ class MainApp:
 					s_cnt = int(float(get_setting('split_buy_cnt', 5))) # 분할 횟수
 					
 					f_step = 0
-					# [UI Step Calculation Fix] 1:1:2:4:8 원칙 및 소액 보정 일원화
-					# check_n_buy.py에서 실시간 계산된 'current_step'이 있으면 우선 사용 (정밀도)
-					computed_step = 0
-					
-					if 'current_step' in s:
-						computed_step = int(s['current_step'])
-					else:
-						# [Fixed Logic] database_helpers와 동일한 로직 적용
-						if alloc_per_stock < 50000:
-							# 소액 계좌: 최소 매수금 단위 물리적 단계
-							min_val = get_setting('min_purchase_amount', 2000)
-							try: min_amt = float(str(min_val).replace(',', ''))
-							except: min_amt = 2000
-							if min_amt <= 0: min_amt = 2000
-							import math
-							# [Intuition Fix] 수량이 1주라면 무조건 1차로 판정
-							if qty <= 1:
-								computed_step = 1
-							else:
-								computed_step = int(math.ceil(pur_amt / min_amt))
-
+					# [Step Calc] Pure Quantity Mapping (사용자 직관 우선)
+					try:
+						if qty <= 1:
+							computed_step = 1
 						else:
-							# 일반 계좌: 비율 기반 단계 판독
-							# ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0 (이미 위에서 계산됨)
-							for i, threshold in enumerate(cumulative_ratios):
-								if ratio >= (threshold * 0.7):
-									computed_step = i + 1
+							computed_step = int(math.log2(qty) + 1)
+					except:
+						computed_step = 1
+
+					cur_st_mode = "REAL"
+					try:
+						if str(get_setting('use_mock_server', False)).lower() in ['1', 'true', 'on']: cur_st_mode = "MOCK"
+						elif str(get_setting('is_paper_trading', False)).lower() in ['1', 'true', 'on']: cur_st_mode = "PAPER"
+					except: pass
+
+					# DB 기록과 대조 보정
+					db_cnt = get_watering_step_count_sync(code, cur_st_mode)
+					if db_cnt > 0 and abs(db_cnt - computed_step) <= 1:
+						computed_step = db_cnt
 					
-					if computed_step == 0: computed_step = 1
+					if qty <= 1: computed_step = 1 # 최종 가드
 					display_step = computed_step if computed_step <= s_cnt else s_cnt
 
 					

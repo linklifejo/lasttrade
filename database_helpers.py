@@ -330,40 +330,34 @@ def get_current_status(mode='MOCK'):
 						curr_s += w
 						cumulative_ratios.append(curr_s / tw)
 					
-					# [Fixed] 실제 투입액 기반 단계 판독
-					# 유저 요청: 손익률에 따라 단계가 출렁이지 않도록 '원금(Principal)' 기준 자산 사용
-					# total_asset(평가금) 대신 principal_basis(현금+매입원금)를 분모로 사용하여 단계 고정
-					principal_basis = deposit + total_buy_principal # 평가손익을 제외한 원금 기준 자산
-					capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
-					target_stocks = float(get_setting('target_stock_count', 5))
-					
-					if int(target_stocks) == 1:
-						alloc_per_stock = principal_basis * 0.98
-					else:
-						alloc_per_stock = (principal_basis * capital_ratio) / target_stocks if target_stocks > 0 else 1
-					
-					actual_step = 0
-					
-					# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용 (보정 기준 5만원)
-					if alloc_per_stock < 50000:
-						min_val = get_setting('min_purchase_amount', 2000)
-						try: min_amt = float(str(min_val).replace(',', ''))
-						except: min_amt = 2000
-						if min_amt <= 0: min_amt = 2000
-						
-						import math
-						# [Intuition Fix] 수량이 1주라면 무조건 1차로 판정
+					# [Step Calc] Pure Quantity Mapping (사용자 직관 우선)
+					# 수량에 따라 단계를 역산합니다. (1->1, 2->2, 4->3, 8->4, 16->5)
+					try:
 						if qty <= 1:
 							actual_step = 1
 						else:
-							actual_step = int(math.ceil(pur_amt / min_amt))
+							actual_step = int(math.log2(qty) + 1)
+					except:
+						actual_step = 1
+					
+					# DB 카운트와 대조 보정
+					try:
+						cursor = conn.execute('''
+							SELECT COUNT(*) FROM trades 
+							WHERE mode = ? AND code = ? AND type = 'buy'
+							AND timestamp > (
+								SELECT COALESCE(MAX(timestamp), '2000-01-01') 
+								FROM trades 
+								WHERE mode = ? AND code = ? AND type = 'sell'
+							)
+						''', (mode, code, mode, code))
+						db_s = int(cursor.fetchone()[0])
+						if db_s > 0 and abs(db_s - actual_step) <= 1:
+							actual_step = db_s
+					except: pass
 
-					else:
-						# 일반 비율 기반 단계
-						ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-						for i, threshold in enumerate(cumulative_ratios):
-							if ratio >= (threshold * 0.7): # 70% 이상 채워지면 해당 단계로 기민하게 인정
-								actual_step = i + 1
+					if qty <= 1: actual_step = 1 # 최종 가드
+
 					
 					display_step = actual_step if actual_step <= s_cnt else s_cnt
 
@@ -483,35 +477,32 @@ def get_current_status(mode='MOCK'):
 									else: weights.append(2**(i - 1))
 								tw = sum(weights)
 								
-								# 2. 단계 판독
-								cumulative_ratios = []
-								curr_s = 0
-								for w in weights:
-									curr_s += w
-									cumulative_ratios.append(curr_s / tw)
-								
-								step_idx = 0
-								# [소액 보정] 할당액이 적으면 물리적 단계 적용
-								if alloc_per_stock < 50000:
-									min_val = get_setting('min_purchase_amount', 2000)
-									try: min_amt = float(str(min_val).replace(',', ''))
-									except: min_amt = 2000
-									if min_amt <= 0: min_amt = 2000
-									import math
-									# [Intuition Fix] 수량이 1주라면 무조건 1차로 판정
+								# [Step Calc] Pure Quantity Mapping (사용자 직관 우선)
+								try:
 									if qty <= 1:
 										step_idx = 1
 									else:
-										step_idx = int(math.ceil(pur_amt / min_amt))
-
-								else:
-									# [Stable Fix] alloc_per_stock이 principal_basis 기반이므로 출렁이지 않음
-									ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-									for i, threshold in enumerate(cumulative_ratios):
-										if ratio >= (threshold * 0.7):
-											step_idx = i + 1
+										step_idx = int(math.log2(qty) + 1)
+								except:
+									step_idx = 1
 								
-								if step_idx == 0: step_idx = 1
+								# DB 카운트와 대조
+								try:
+									cursor = conn.execute('''
+										SELECT COUNT(*) FROM trades 
+										WHERE mode = ? AND code = ? AND type = 'buy'
+										AND timestamp > (
+											SELECT COALESCE(MAX(timestamp), '2000-01-01') 
+											FROM trades 
+											WHERE mode = ? AND code = ? AND type = 'sell'
+										)
+									''', (mode, code, mode, code))
+									db_sc = int(cursor.fetchone()[0])
+									if db_sc > 0 and abs(db_sc - step_idx) <= 1:
+										step_idx = db_sc
+								except: pass
+								
+								if qty <= 1: step_idx = 1 # 최종 가드
 								display_step = step_idx if step_idx <= split_buy_cnt_val else split_buy_cnt_val
 								step_str = f"{display_step}차"
 								if display_step >= split_buy_cnt_val: step_str += "(MAX)"

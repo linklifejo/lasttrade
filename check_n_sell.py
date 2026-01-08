@@ -6,7 +6,8 @@ import os
 from tel_send import tel_send
 from get_setting import get_setting as cached_setting
 from logger import logger
-from database import log_trade_sync, update_high_price_sync, get_high_price_sync, clear_stock_status_sync
+from database import log_trade_sync, update_high_price_sync, get_high_price_sync, clear_stock_status_sync, get_watering_step_count_sync
+
 from utils import normalize_stock_code
 import check_n_buy
 
@@ -186,36 +187,26 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				current_sum += w
 				cumulative_ratios.append(current_sum / total_weight)
 
-			# 실제 투입 금액 기반 단계 판정
-			cur_step = 1
-			if alloc_per_stock > 0:
-				# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용
-				if alloc_per_stock < 50000:
-					# [Fix] 키 명칭 통일 (min_purchase_amount) 및 기본값 2000원 유지
-					min_val = cached_setting('min_purchase_amount', 2000)
-					try: min_amt = float(str(min_val).replace(',', ''))
-					except: min_amt = 2000
-					if min_amt < 100: min_amt = 2000 # 너무 작은 값 방지 (버그 방어)
-					
-					import math
-					# [Intuition Fix] 수량이 1주라면 무조건 1차로 판정
-					if qty <= 1:
-						cur_step = 1
-					else:
-						cur_step = int(math.ceil(pchs_amt / min_amt))
-
-					if cur_step > split_buy_cnt: cur_step = split_buy_cnt
-					if cur_step < 1: cur_step = 1
-
+			# [Step Calc] Pure Quantity Method (사용자 직관 우선)
+			# 원칙: 1:1:2:4:8 수열 -> 합계 1, 2, 4, 8, 16...
+			import math
+			try:
+				if qty <= 1:
+					cur_step = 1
 				else:
-					# [Intuition Fix] 수량이 1주라면 비중과 상관없이 무조건 1차로 판정
-					if qty <= 1:
-						cur_step = 1
-					else:
-						for i, ratio in enumerate(cumulative_ratios):
-							# 현재 매입금이 해당 단계 비중의 98% 이상이면 그 단계로 인정
-							if pchs_amt >= (alloc_per_stock * ratio * 0.98):
-								cur_step = i + 1
+					cur_step = int(math.log2(qty) + 1)
+			except:
+				cur_step = 1
+			
+			# DB 기록(매수 횟수)과 대조 및 보정
+			db_c = get_watering_step_count_sync(stock_code, mode="REAL" if not cached_setting('use_mock_server', False) else "MOCK")
+			if db_c > 0 and abs(db_c - cur_step) <= 1:
+				cur_step = db_c
+			elif qty <= 1:
+				cur_step = 1 # 1주면 무조건 1차
+			
+			if cur_step < 1: cur_step = 1
+			if cur_step > split_buy_cnt: cur_step = split_buy_cnt
 
 			
 			# [수정] 비중 90% 조건 삭제 (마틴게일 4차/5차 구분 명확화 필요)

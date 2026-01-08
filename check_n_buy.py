@@ -8,7 +8,8 @@ from tel_send import tel_send
 from get_setting import get_setting
 from logger import logger
 from analyze_tools import calculate_rsi, get_rsi_for_timeframe
-from database import get_price_history_sync, log_signal_snapshot_sync
+from database import get_price_history_sync, log_signal_snapshot_sync, get_watering_step_count_sync
+
 from technical_judge import technical_judge
 from utils import normalize_stock_code
 from stock_info import fn_ka10001 as stock_info
@@ -572,31 +573,26 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# 현재 매입 비율
 		filled_ratio = cur_pchs_amt / alloc_per_stock
 		
-		# [Step Calc] 1:1:2:4:8 비중 기반 정밀 단계 판독
-		actual_current_step = 0
-		
-		# [소액 보정] 할당액이 적으면 금액 비율이 왜곡되므로 매입금액 기반 물리적 단계 적용 (보정 기준 5만원)
-		if alloc_per_stock < 50000:
-			min_val = get_setting('min_purchase_amount', 2000)
-			try: min_amt = float(str(min_val).replace(',', ''))
-			except: min_amt = 2000
-			if min_amt <= 0: min_amt = 2000
-			
-			import math
-			# [Intuition Fix] 수량이 1주라면 금액과 상관없이 1차로 판정
+		# [Step Calc] Pure Quantity-Mapping Method (사용자 직관 100% 반영)
+		# 원칙: 1:1:2:4:8 수열에서 합계는 1, 2, 4, 8, 16으로 증가함
+		# 따라서 단계 = log2(현재수량 / 최초수량) + 1
+		import math
+		try:
 			if cur_pchs_qty <= 1:
 				actual_current_step = 1
 			else:
-				actual_current_step = int(math.ceil(cur_pchs_amt / min_amt))
-
-		else:
-			# 일반 비율 기반 단계
-			for i, ratio in enumerate(cumulative_ratios):
-				# 현재 매입 비중이 누적 비중의 70% 이상 채워졌다면 해당 단계로 기민하게 인정
-				if filled_ratio >= (ratio * 0.7):
-					actual_current_step = i + 1
+				# 2^n 계열로 단계를 역산 (1주->1차, 2주->2차, 4주->3차, 8주->4차, 16주->5차)
+				actual_current_step = int(math.log2(cur_pchs_qty) + 1)
+		except:
+			actual_current_step = 1
 		
-		if actual_current_step == 0: actual_current_step = 1
+		# DB 카운트와 비교하여 더 신뢰할 수 있는 값 선택 (방어적)
+		db_count = get_watering_step_count_sync(stk_cd, buy_mode)
+		if db_count > 0 and abs(db_count - actual_current_step) <= 1:
+			# DB 기록이 있고 수량 기반 계산과 비슷하다면 DB 기록(횟수)을 존중
+			actual_current_step = db_count
+		elif cur_pchs_qty <= 1:
+			actual_current_step = 1 # 1주면 다른 거 다 무시하고 1차
 		
 		# [UI Sync]
 		display_step = actual_current_step if actual_current_step <= split_cnt else split_cnt

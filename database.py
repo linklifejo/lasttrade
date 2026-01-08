@@ -447,6 +447,27 @@ def clear_stock_status_sync(code):
 	except Exception as e:
 		logger.error(f"DB 종목 상태 삭제 실패(Sync): {e}")
 
+def get_watering_step_count_sync(code, mode='REAL'):
+	"""현재 보유중인 종목의 매수 횟수(단계) 조회 (Sync)"""
+	try:
+		# 종목 코드가 A로 시작하면 제거
+		clean_code = str(code).replace('A', '')
+		with get_db_connection() as conn:
+			cursor = conn.execute('''
+				SELECT COUNT(*) FROM trades 
+				WHERE mode = ? AND code = ? AND type = 'buy'
+				AND timestamp > (
+					SELECT COALESCE(MAX(timestamp), '2000-01-01') 
+					FROM trades 
+					WHERE mode = ? AND code = ? AND type = 'sell'
+				)
+			''', (mode, clean_code, mode, clean_code))
+			row = cursor.fetchone()
+			return int(row[0]) if row else 0
+	except Exception as e:
+		logger.error(f"DB 매수 횟수 조회 실패(Sync): {e}")
+		return 0
+
 def get_price_history_sync(code, limit=30):
 	"""RSI 계산용 가격 히스토리 조회 (Sync)"""
 	try:
