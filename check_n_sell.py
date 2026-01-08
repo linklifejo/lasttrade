@@ -189,7 +189,12 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					if min_amt < 100: min_amt = 2000 # 너무 작은 값 방지 (버그 방어)
 					
 					import math
-					cur_step = int(math.ceil(pchs_amt / min_amt))
+					# [Intuition Fix] 수량이 1주라면 무조건 1차로 판정
+					if qty <= 1:
+						cur_step = 1
+					else:
+						cur_step = int(math.ceil(pchs_amt / min_amt))
+
 					if cur_step > split_buy_cnt: cur_step = split_buy_cnt
 					if cur_step < 1: cur_step = 1
 

@@ -728,7 +728,12 @@ class MainApp:
 							except: min_amt = 2000
 							if min_amt <= 0: min_amt = 2000
 							import math
-							computed_step = int(math.ceil(pur_amt / min_amt))
+							# [Intuition Fix] 수량이 1주라면 무조건 1차로 판정
+							if qty <= 1:
+								computed_step = 1
+							else:
+								computed_step = int(math.ceil(pur_amt / min_amt))
+
 						else:
 							# 일반 계좌: 비율 기반 단계 판독
 							# ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0 (이미 위에서 계산됨)

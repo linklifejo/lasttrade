@@ -352,7 +352,12 @@ def get_current_status(mode='MOCK'):
 						if min_amt <= 0: min_amt = 2000
 						
 						import math
-						actual_step = int(math.ceil(pur_amt / min_amt))
+						# [Intuition Fix] 수량이 1주라면 무조건 1차로 판정
+						if qty <= 1:
+							actual_step = 1
+						else:
+							actual_step = int(math.ceil(pur_amt / min_amt))
+
 					else:
 						# 일반 비율 기반 단계
 						ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
@@ -493,7 +498,12 @@ def get_current_status(mode='MOCK'):
 									except: min_amt = 2000
 									if min_amt <= 0: min_amt = 2000
 									import math
-									step_idx = int(math.ceil(pur_amt / min_amt))
+									# [Intuition Fix] 수량이 1주라면 무조건 1차로 판정
+									if qty <= 1:
+										step_idx = 1
+									else:
+										step_idx = int(math.ceil(pur_amt / min_amt))
+
 								else:
 									# [Stable Fix] alloc_per_stock이 principal_basis 기반이므로 출렁이지 않음
 									ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0

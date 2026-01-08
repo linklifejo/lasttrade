@@ -478,7 +478,10 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
             
 	# 내부 추적값과 API 값 중 큰 것을 현재 매입금액으로 사용 (방어적)
 	cur_pchs_amt = max(cur_pchs_amt_api, accum_amt)
+	cur_pchs_qty = int(current_holding.get('rmnd_qty', 0)) if current_holding else 0
+	
 	if cur_pchs_amt > cur_pchs_amt_api:
+
 		logger.info(f"[데이터 보정] {stk_cd}: API 매입금액({cur_pchs_amt_api}) < 내부 추적금액({accum_amt}) -> 내부 데이터 사용")
 
 	# 보유 여부 판단: API상 있거나, 내부적으로 샀다고 기록되어 있으면 보유 중으로 처리
@@ -580,7 +583,12 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			if min_amt <= 0: min_amt = 2000
 			
 			import math
-			actual_current_step = int(math.ceil(cur_pchs_amt / min_amt))
+			# [Intuition Fix] 수량이 1주라면 금액과 상관없이 1차로 판정
+			if cur_pchs_qty <= 1:
+				actual_current_step = 1
+			else:
+				actual_current_step = int(math.ceil(cur_pchs_amt / min_amt))
+
 		else:
 			# 일반 비율 기반 단계
 			for i, ratio in enumerate(cumulative_ratios):
