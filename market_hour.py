@@ -111,12 +111,21 @@ class MarketHour:
 	
 	@classmethod
 	def is_market_end_time(cls):
-		"""현재 시간이 장 종료 시간인지 확인합니다."""
+		"""현재 시간이 장 종료 시간(사용자 설정 시간 OR 15:30)인지 확인합니다."""
 		if not cls._is_weekday():
 			return False
 		now = datetime.datetime.now()
-		market_end = cls._get_market_time(cls.MARKET_END_HOUR, cls.MARKET_END_MINUTE)
-		return now >= market_end and (now - market_end).seconds < 60  # 1분 이내
+		
+		# 1. 사용자 설정 시간 체크
+		h, m = cls.get_liquidation_time()
+		user_end = cls._get_market_time(h, m)
+		is_user_time = (now >= user_end and (now - user_end).seconds < 60)
+		
+		# 2. 실제 장 마감 시간(15:30) 체크 (안전장치)
+		real_end = cls._get_market_time(cls.MARKET_END_HOUR, cls.MARKET_END_MINUTE)
+		is_real_time = (now >= real_end and (now - real_end).seconds < 60)
+		
+		return is_user_time or is_real_time
 	@classmethod
 	def is_time_passed(cls, target_time_str):
 		"""
