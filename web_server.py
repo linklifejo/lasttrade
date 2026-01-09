@@ -6,6 +6,7 @@
 import os
 import json
 import asyncio
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -157,8 +158,9 @@ async def get_status():
         if not use_mock and is_paper:
             current_mode = "PAPER"
         
-        # 3. 항상 실시간으로 계산 (캐시 사용 안 함)
-        status = get_current_status(current_mode)
+        # 3. 항상 실시간으로 계산 (캐시 사용 안 함) - 블로킹 방지
+        loop = asyncio.get_running_loop()
+        status = await loop.run_in_executor(None, get_current_status, current_mode)
         
         # 4. summary에 현재 설정값 명시
         if 'summary' in status:
@@ -275,15 +277,22 @@ async def update_settings(request: Request):
         from database_helpers import save_all_settings
         
         new_settings = await request.json()
-        logger.info(f"📥 설정 저장 요청 받음: {new_settings.keys()}")
-        # [DEBUG] 주요 필드 값 확인
-        debug_keys = ['real_app_key', 'my_account', 'trading_mode']
-        for k in debug_keys:
-            if k in new_settings:
-                logger.info(f"  - {k}: {new_settings[k]}")
+        logger.info(f"📥 설정 저장 요청 받음: {len(new_settings)}개 필드")
         
-        # DB에 저장
-        save_all_settings(new_settings)
+        # [DEBUG] 상세 로깅
+        import pprint
+        logger.info(f"  [Payload Preview] {str(new_settings)[:100]}...")
+        
+        # DB에 저장 (동기 함수이므로 이벤트 루프 차단 방지를 위해 thread에서 실행)
+        loop = asyncio.get_running_loop()
+        logger.info("  [Settings] DB 저장 시작...")
+        
+        # [New] 수동 업데이트 타임스탬프 추가
+        new_settings['last_manual_setting_update'] = time.time()
+        
+        t1 = time.time()
+        await loop.run_in_executor(None, save_all_settings, new_settings)
+        logger.info(f"  [Settings] DB 저장 완료 ({time.time()-t1:.3f}s)")
         
         # [환경 전환] 모드 전환 또는 API 키 변경 시 API 재초기화 및 봇 재부팅 신호
         auth_keys = ['use_mock_server', 'is_paper_trading', 'trading_mode', 'real_app_key', 'real_app_secret', 'paper_app_key', 'paper_app_secret']
@@ -291,22 +300,38 @@ async def update_settings(request: Request):
             try:
                 # 1. API 재초기화
                 import kiwoom_adapter
-                kiwoom_adapter.reset_api()
+                await loop.run_in_executor(None, kiwoom_adapter.reset_api)
                 logger.info(f"🔄 API 팩토리 초기화 완료 (모드/키 변경)")
                 
+                # [UX] Real 모드로 변경 시 자동 시작 활성화 (사용자 의도 반영)
+                # use_mock_server가 False로 오거나, trading_mode가 REAL로 오면
+                if (new_settings.get('use_mock_server') is False) or (new_settings.get('trading_mode') == 'REAL'):
+                    new_settings['auto_start'] = True
+                    await loop.run_in_executor(None, save_all_settings, {'auto_start': True})
+                    logger.info("🚀 [UX] Real 모드 변경 감지 -> Auto Start 활성화")
+
                 # 2. 봇 프로세스에 재시작(Re-init) 명령 전달
                 from database_helpers import add_web_command
-                add_web_command('reinit')
+                await loop.run_in_executor(None, add_web_command, 'reinit')
                 logger.info(f"🚀 봇 재시작(Re-init) 명령 전달됨")
             except Exception as e:
                 logger.error(f"⚠️ 봇 동기화 신호 전달 실패: {e}")
+        else:
+            # [일반 설정 변경] 모드/키 변경이 아닌 경우에도 즉시 데이터 갱신
+            try:
+                from database_helpers import add_web_command
+                await loop.run_in_executor(None, add_web_command, 'report')
+                logger.info(f"🔄 설정 변경 감지 - 데이터 즉시 갱신 명령 전달 완료 ({time.time()-t1:.3f}s)")
+            except Exception as e:
+                logger.error(f"⚠️ 데이터 갱신 신호 전달 실패: {e}")
         
-        logger.info(f"✅ 설정 저장 완료 및 동기화 신호 발송")
-        return {"success": True, "message": "설정이 저장되었으며 시스템이 재시작됩니다."}
+        logger.info(f"✅ 설정 저장 프로세스 전체 완료 ({time.time()-t1:.3f}s)")
+        return {"success": True, "message": "설정이 저장되었습니다."}
     except Exception as e:
         logger.error(f"❌ 설정 저장 실패: {e}")
         import traceback
         traceback.print_exc()
+        return {"success": False, "error": str(e)}
 
 
 class CommandRequest(BaseModel):
@@ -326,8 +351,11 @@ async def send_command(request: CommandRequest):
         if request.command not in valid_commands:
             return {"success": False, "error": f"Invalid command: {request.command}"}
         
-        # DB에 명령 저장
-        if add_web_command(request.command):
+        # DB에 명령 저장 (동기 함수 블로킹 방지)
+        loop = asyncio.get_running_loop()
+        success = await loop.run_in_executor(None, add_web_command, request.command)
+        
+        if success:
             return {"success": True, "command": request.command, "message": f"'{request.command}' 명령이 전송되었습니다."}
         else:
             return {"success": False, "error": "DB 저장 실패"}
@@ -340,7 +368,8 @@ async def get_command():
     """대기 중인 명령 조회 (봇에서 polling)"""
     try:
         from database_helpers import get_pending_web_command
-        data = get_pending_web_command()
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, get_pending_web_command)
         if data:
             return data
     except Exception as e:
@@ -440,7 +469,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 # 2. 통합된 상태 조회 함수 사용 (DB값 대신 실시간 값)
                 # 이로써 REST API와 WebSocket이 동일한 로직(매수 횟수 카운트 등)을 공유하게 됨
-                data = get_current_status(mode)
+                loop = asyncio.get_running_loop()
+                data = await loop.run_in_executor(None, get_current_status, mode)
                 
                 if data:
                     await websocket.send_json(data)

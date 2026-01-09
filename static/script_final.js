@@ -951,22 +951,27 @@ async function saveSettings() {
         const result = await response.json();
         console.log('📥 서버 응답:', result);
 
-        // 시각적 피드백 강화
-        if (btnGeneral) btnGeneral.innerHTML = '✅ 저장 완료!';
-        if (btnCreds) btnCreds.innerHTML = '✅ 저장 완료!';
-
-        // [UX] Toast 알림만 표시
-        showToast('✅ 설정이 성공적으로 저장되었습니다! (DB 동기화 완료)', 'success');
-        addLog(`시스템 설정이 업데이트되었습니다.`, 'success');
+        if (result.success) {
+            // 시각적 피드백 강화
+            if (btnGeneral) btnGeneral.innerHTML = '✅ 저장 완료!';
+            if (btnCreds) btnCreds.innerHTML = '✅ 저장 완료!';
+            showToast('✅ 설정이 성공적으로 저장되었습니다! (DB 동기화 완료)', 'success');
+            addLog(`시스템 설정이 업데이트되었습니다.`, 'success');
+        } else {
+            throw new Error(result.error || '저장 실패');
+        }
 
         // [Critical Fix] 모든 캐시 초기화 및 다시 로드
         isTableInitialized = false;
         lastHoldingsJSON = '';
         globalTradingLogs = { buys: [], sells: [] };
 
-        // 1초 후 UI 복구 (설정 로드와 병렬 처리)
+    } catch (e) {
+        console.error('❌ 저장 실패:', e);
+        showToast('❌ 저장 실패: ' + e.message, 'error');
+    } finally {
+        // [Reliability] 어떤 경우에도 1.5초 후 버튼 복구 및 뺑뺑이 제거
         setTimeout(() => {
-            // 버튼 즉시 복구
             if (btnGeneral) {
                 btnGeneral.innerHTML = originalTextGeneral || '💾 설정 저장 및 동기화';
                 btnGeneral.disabled = false;
@@ -977,23 +982,10 @@ async function saveSettings() {
             }
             window._is_saving_settings = false;
 
-            // 백그라운드에서 최신 데이터 로드
+            // 데이터 최신화
             loadSettings();
             loadTradingLog(true);
-        }, 1000);
-
-    } catch (e) {
-        console.error('❌ 저장 실패:', e);
-        if (btnGeneral) {
-            btnGeneral.innerHTML = originalTextGeneral || '💾 설정 저장 및 동기화';
-            btnGeneral.disabled = false;
-        }
-        if (btnCreds) {
-            btnCreds.innerHTML = originalTextCreds || '💾 인증 정보 저장 및 동기화';
-            btnCreds.disabled = false;
-        }
-        showToast('❌ 저장 실패: ' + e.message, 'error');
-        window._is_saving_settings = false;
+        }, 1500);
     }
 }
 

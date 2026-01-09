@@ -24,9 +24,9 @@ def get_db_connection():
 		try:
 			conn = sqlite3.connect(DB_FILE)
 			conn.row_factory = sqlite3.Row
-			# WAL 모드 활성화 (동시성 향상)
+			# [Critical] WAL 모드 활성화 (읽기/쓰기 충돌 방지)
 			conn.execute("PRAGMA journal_mode=WAL")
-			# Busy Timeout 설정 (핵심: Lock 걸리면 기다려라)
+			# Busy Timeout 설정 (30초 대기)
 			conn.execute("PRAGMA busy_timeout = 30000")
 			return conn
 		except sqlite3.OperationalError as e:
@@ -207,8 +207,12 @@ def save_all_settings(settings_dict):
 		elif 'sl_rate' in settings_dict:
 			settings_dict['stop_loss_rate'] = settings_dict['sl_rate']
 
+		if not settings_dict:
+			return True
+			
 		with get_db_connection() as conn:
-			conn.execute("BEGIN TRANSACTION")
+			# [Reliability] BEGIN IMMEDIATE를 사용하여 쓰기 잠금을 즉시 획득 (교착 상태 방지)
+			conn.execute("BEGIN IMMEDIATE TRANSACTION")
 			for key, value in settings_dict.items():
 				# JSON 직렬화
 				if isinstance(value, (dict, list)):
@@ -348,6 +352,10 @@ def get_current_status(mode='MOCK'):
 					except:
 						actual_step = 1
 
+					# [CRITICAL Fix] 1주 보유 시 무조건 1단계로 고정
+					if qty <= 1:
+						actual_step = 1
+
 					display_step = actual_step if actual_step <= s_cnt else s_cnt
 					if display_step == 0: display_step = 1
 					
@@ -473,6 +481,11 @@ def get_current_status(mode='MOCK'):
 									step_idx = 1
 								
 								display_step = step_idx if step_idx <= split_buy_cnt_val else split_buy_cnt_val
+								
+								# [CRITICAL Fix] 1주 보유 시 무조건 1단계로 고정
+								if qty <= 1:
+									display_step = 1
+									
 								step_str = f"{display_step}차"
 								if display_step >= split_buy_cnt_val: 
 									step_str += "(MAX)"

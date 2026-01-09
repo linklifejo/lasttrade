@@ -583,15 +583,22 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			elif str(get_setting('is_paper_trading', False)).lower() in ['1', 'true', 'on']: buy_mode = "PAPER"
 		except: pass
 		
+		# [Step Calc] Transaction Count Method (사용자 요구: 매수 명령 횟수 = 단계)
 		# DB에서 매수 명령 횟수를 직접 카운트 (DISTINCT timestamp)
-		actual_current_step = get_watering_step_count_sync(stk_cd, buy_mode)
+		db_step_count = get_watering_step_count_sync(stk_cd, buy_mode)
 		
-		# [절대 규칙] 1주면 무조건 1차
+		# [절대 규칙] 1주면 무조건 1차 (DB 기록보다 수량 상태를 우선시하여 꼬임 방지)
 		if cur_pchs_qty <= 1:
 			actual_current_step = 1
-		# DB 기록이 없으면 기본 1차로 시작 (수량 기반 추정 제거)
-		elif actual_current_step == 0 and cur_pchs_qty > 0:
-			actual_current_step = 1
+		elif db_step_count > 0:
+			actual_current_step = db_step_count
+		else:
+			# DB 기록이 없으면 비중 기반으로 추정 (Fallback)
+			if filled_ratio < 0.08: actual_current_step = 1
+			elif filled_ratio < 0.18: actual_current_step = 2
+			elif filled_ratio < 0.35: actual_current_step = 3
+			elif filled_ratio < 0.70: actual_current_step = 4
+			else: actual_current_step = 5
 		
 		if actual_current_step < 1: actual_current_step = 1
 		
@@ -600,7 +607,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		if current_holding:
 			current_holding['current_step'] = display_step
 			
-		logger.info(f"[Step Calc] {stk_cd}: 매입비중({filled_ratio*100:.1f}%) -> {display_step}차 판독")
+		logger.info(f"[Step Calc] {stk_cd}: DB기록({db_step_count}회), 비중({filled_ratio*100:.1f}%) -> 최종 {display_step}차 판독 (수량:{cur_pchs_qty}주)")
 
 		# 2. [물타기 목표 설정]
 		strategy_rate_val = float(get_setting('single_stock_rate', 4.0))
@@ -657,6 +664,12 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 				# logger.info(f"[물타기 방어] {stk_cd}: 현재 {pl_rt}% > 목표 {next_target_rate}% (단계:{actual_current_step}) -> 추가 매수 금지")
 				return False
 				
+			# [Bug Fix] 수익률이 목표 구간에 도달했음에도 비중(filled_ratio) 계산상의 문제로 
+			# theoretical_target_step이 actual_current_step과 같게 나오는 경우 방지
+			if pl_rt <= next_target_rate and theoretical_target_step <= actual_current_step:
+				theoretical_target_step = actual_current_step + 1
+				logger.info(f"🔄 [Step Force] {stk_cd}: 수익률({pl_rt}%) 기준 강제 단계 상향 ({actual_current_step} -> {theoretical_target_step})")
+				
 		# 3. 추가 매수 결정
 		target_ratio_val = 0
 		next_step_idx = 0
@@ -678,6 +691,13 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# 5. 매수 금액 산출
 		target_amt = alloc_per_stock * target_ratio_val
 		one_shot_amt = target_amt - cur_pchs_amt
+		
+		# [CRITICAL Fix] 예산 초과 시에도 물타기 조건 충족 시 최소 1주 매수 보장
+		# 비중 계산상으로는 이미 MAX더라도, 단계(Step)상 다음 단계로 넘어가야 한다면 최소 금액만큼 지른다.
+		if theoretical_target_step > actual_current_step and one_shot_amt < MIN_PURCHASE_AMOUNT:
+			logger.info(f"⚠️ [Budget Bypass] {stk_cd}: 예산상 추가매수액({one_shot_amt:,.0f}원)이 부족하지만 물타기 단계({theoretical_target_step}차) 진입을 위해 최소금액({MIN_PURCHASE_AMOUNT:,.0f}원) 투입")
+			one_shot_amt = MIN_PURCHASE_AMOUNT
+		
 		if one_shot_amt < 0: one_shot_amt = 0
 		
 		# [Log] 금액 기반 판단 근거 기록
@@ -702,13 +722,10 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 				logger.warning(f"[매수 금지] {stk_cd}: 현재 익절 구간({pl_rt}%)입니다. 매도 대기 중이므로 추가 매수 불가.")
 				return False
 			
-			# [FIRE 전략] 불타기 중일 때는 손절 구간 체크가 무의미하므로(수익 중이니까) 패스
-			# WATER 전략일 때만 손절 구간에서 비중 체크
+			# [수정] 50% 비중 체크 제거 (WATER 전략은 손절 구간에서도 물타기를 수행해야 함)
 			if single_strategy != 'FIRE' and pl_rt <= sl_rate:
-				# WATER 전략이라도 비중이 어느정도 찼을 수 있으니 보수적으로 접근
-				if filled_ratio > 0.5:
-					logger.warning(f"[매수 금지] {stk_cd}: 현재 손절 구간({pl_rt}%)이며 비중도 50% 이상입니다. 추가 매수 중단.")
-					return False
+				# WATER 전략은 MAX 단계 도달 전까지는 비중과 무관하게 물타기 허용
+				pass
 		except: pass
 
 		# [중요] 추가 매수 시에도 예수금 부족 시 매수 방어

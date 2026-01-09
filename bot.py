@@ -144,6 +144,7 @@ class MainApp:
 			self.today_started = False
 			self.today_stopped = False
 			self.today_learned = False # [NEW] 학습 플래그 리셋
+			self.market_open_notified = False # [Fix] 장전 알림 플래그 리셋
 			self.last_check_date = today
 			
 			# [NEW] 새로운 날 시작 시 전일 데이터 정리
@@ -164,6 +165,12 @@ class MainApp:
 					logger.error(f"⚠️ 데이터 정리 실패: {result.stderr}")
 			except Exception as e:
 				logger.error(f"⚠️ 데이터 정리 오류: {e}")
+
+			# [AI Smart Count] 장 시작 시 예산에 맞게 종목 수 자동 최적화
+			self._optimize_stock_count_by_budget()
+
+			# [AI Smart Count] 장 시작 시 예산에 맞게 종목 수 자동 최적화
+			self._optimize_stock_count_by_budget()
 		
 		# 1. 자동 시작 처리
 		# Mock 모드이거나 장중이면 자동 시작
@@ -198,9 +205,9 @@ class MainApp:
 				logger.info("💤 [AutoStart] 조건 불만족. 대기합니다.")
 			
 			# 장전인데 아직 플래그가 안 켜졌으면 (로그 출력용)
-			if not self.today_started:
+			if not self.market_open_notified:
 				logger.info(f"자동 시작 대기 중 - 장 시작 시 자동으로 연결됩니다.")
-				self.today_started = True # 메시지 중복 방지용
+				self.market_open_notified = True # 메시지 중복 방지용
 		
 		# 2. 장 종료 처리 (매도 및 정지)
 		# [Fix] Mock(가상 서버) 모드일 때는 24시간 동작하므로 장 종료 자동 정지 스킵
@@ -258,13 +265,18 @@ class MainApp:
 			# 현재 모드 확인
 			current_mode = get_current_api_mode()
 		
-			# [중요] 거래일 체크 (주말 + 공휴일 제외)
 			if not MarketHour.is_trading_day():
 				return  # 휴장일에는 자동 전환 스킵
 		
-			# Mock → Real 전환 (장 시작)
-			if current_time == real_switch_time and current_mode == "Mock":
-				logger.info(f"🔄 [{real_switch_time}] 자동 전환: Mock → Real (실전 매매 시작)")
+			# [Mod] 수동 변경 감지 로직 제거 (사용자 의도: 일단 전환 후 시간 체크에 따라 처리)
+			# last_manual_update = float(get_setting('last_manual_setting_update', 0))
+			# if time.time() - last_manual_update < 300: ...
+
+
+			# Mock → Real 전환 (장 시작 시간 이후 & 아직 Mock인 경우)
+			# [Fix] 단순 == 비교 대신 >= 비교로 변경하여 봇이 늦게 켜져도 전환되도록 함 (단, 점심시간 전까지만)
+			if real_switch_time <= current_time < "12:00" and current_mode == "Mock":
+				logger.info(f"🔄 [{current_time}] 자동 전환: Mock → Real (실전 매매 시작)")
 				from database_helpers import save_setting
 				save_setting('use_mock_server', False)
 				save_setting('trading_mode', 'REAL')
@@ -273,14 +285,30 @@ class MainApp:
 				from kiwoom_adapter import reset_api
 				reset_api()
 				
+				# [AI Smart Count] Real 모드 진입 시 예산 최적화 즉시 실행
+				self._optimize_stock_count_by_budget()
+				
 				logger.info("✅ Real 서버로 전환 완료 - 실전 매매 활성화")
+				# [New] 전환 후 즉시 다음 루프에서 자동 시작되도록 플래그 보정
+				self.manual_stop = False
+				from database_helpers import save_setting
+				save_setting('auto_start', True)
 			
-			# Real → Mock 전환 (장 마감 후)
-			elif current_time == mock_switch_time and current_mode != "Mock":
-				logger.info(f"🔄 [{mock_switch_time}] 자동 전환: Real → Mock (실전 종료)")
+			# Real → Mock 전환 (장 마감 시간 이후 & 아직 Real인 경우)
+			elif current_time >= mock_switch_time and current_mode != "Mock":
+				logger.info(f"⚠️ [{current_time}] 장 시간이 아닙니다. Mock 모드로 자동 전환합니다.")
+				
 				from database_helpers import save_setting
 				save_setting('use_mock_server', True)
 				save_setting('trading_mode', 'MOCK')
+				
+				# [AI Smart Count] Mock 모드에서는 테스트를 위해 종목 수 넉넉히 복구 (기본 5개)
+				save_setting('target_stock_count', 5)
+				logger.info("🧪 [Mock 모드] 테스트 환경을 위해 목표 종목 수를 5개로 재설정했습니다.")
+				
+				# [Fix] Mock 복귀 시 Auto Start 활성화
+				self.manual_stop = False
+				save_setting('auto_start', True)
 				
 				# API 어댑터 재설정
 				from kiwoom_adapter import reset_api
@@ -294,6 +322,9 @@ class MainApp:
 	async def check_web_command(self):
 		"""웹 대시보드에서 보낸 명령을 확인하고 처리합니다. (DB 기반)"""
 		try:
+			# [Fix] 함수 시작 부분에서 미리 import하여 Scope 문제 방지
+			from database_helpers import mark_web_command_completed, save_setting, set_bot_running
+
 			cmd_info = get_pending_web_command()
 			if cmd_info:
 				command = cmd_info.get('command')
@@ -319,7 +350,6 @@ class MainApp:
 					from check_n_buy import reset_accumulation_global
 					reset_accumulation_global()
 					
-					from database_helpers import mark_web_command_completed
 					mark_web_command_completed(cmd_id) # 중요: 명령 처리 완료 마킹
 					
 					# [Immediate Refresh] 즉시 데이터 갱신하여 UI 반영
@@ -333,11 +363,13 @@ class MainApp:
 					
 				elif command == 'report':
 					# 웹에서 리포트 요청 시 텔레그램 발송 없이 JSON만 업데이트
-					await self.chat_command.report(send_telegram=False)
+					try:
+						await self.chat_command.report(send_telegram=False)
+					finally:
+						mark_web_command_completed(cmd_id)
+					
 				else:
 					# 시작/종료 명령 시 즉시 로그 출력
-					from database_helpers import mark_web_command_completed, save_setting, set_bot_running
-					
 					if command == 'stop':
 						self.manual_stop = True
 						save_setting('auto_start', 'false')
@@ -733,36 +765,35 @@ class MainApp:
 					s_cnt = int(float(get_setting('split_buy_cnt', 5))) # 분할 횟수
 					
 					f_step = 0
-					# [Step Calc] Weight-based Mapping (매매 로직과 일관성 유지)
+					# [Step Calc] DB 기록 기반 단계 판독 (사용자 요청: 매수 명령 횟수 = 단계)
+					cur_st_mode = "REAL"
 					try:
+						if str(get_setting('use_mock_server', False)).lower() in ['1', 'true', 'on']: cur_st_mode = "MOCK"
+						elif str(get_setting('is_paper_trading', False)).lower() in ['1', 'true', 'on']: cur_st_mode = "PAPER"
+					except: pass
+					
+					computed_step = get_watering_step_count_sync(code, cur_st_mode)
+
+					# [절대 규칙] 1주면 무조건 1차 (비중 오차 방지)
+					if qty <= 1:
+						computed_step = 1
+					elif computed_step == 0:
+						# DB 기록이 없는 경우에만 비중(Ratio) 기반으로 판독 (Backward Compatibility)
 						f_ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
 						if f_ratio < 0.08: computed_step = 1
 						elif f_ratio < 0.18: computed_step = 2
 						elif f_ratio < 0.35: computed_step = 3
 						elif f_ratio < 0.70: computed_step = 4
 						else: computed_step = 5
-					except:
-						computed_step = 1
+						
+					# [Robust Fix] 수량이 적은데 비중만 높은 경우(저가주 등) 강제 하향 조정
+					if qty == 2 and computed_step > 2: computed_step = 2 
+					elif qty == 3 and computed_step > 3: computed_step = 3
 
-					cur_st_mode = "REAL"
-					try:
-						if str(get_setting('use_mock_server', False)).lower() in ['1', 'true', 'on']: cur_st_mode = "MOCK"
-						elif str(get_setting('is_paper_trading', False)).lower() in ['1', 'true', 'on']: cur_st_mode = "PAPER"
-					except: pass
-
-					# DB 기록 참고 (로그용)
-					db_cnt = get_watering_step_count_sync(code, cur_st_mode)
-					if db_cnt > 0 and db_cnt != computed_step:
-						logger.debug(f"[Step] {code}: 수량기반={computed_step}차, DB기록={db_cnt}회 (수량 우선)")
-					
-					if qty <= 1: computed_step = 1 # 최종 가드
 					display_step = computed_step if computed_step <= s_cnt else s_cnt
-
 					
-					# [UI Labeling] Simplification ('1차', '2차'...)
+					# [UI Labeling]
 					step_str = f"{computed_step}차"
-					
-					# [Fix] MAX 표시 부활 (실제 s_cnt 도달 시 정보 제공용)
 					if computed_step >= s_cnt:
 						step_str = f"{computed_step}차(MAX)"
 					
@@ -770,7 +801,7 @@ class MainApp:
 					
 					# [Debug] 엔진 로그 출력 (단계를 건너뛸 때)
 					if computed_step > 1:
-						logger.info(f"📊 [UI] {code}: {pl_rt:.1f}% -> {step_str} (Ratio:{ratio:.2f})")
+						logger.info(f"📊 [UI] {code}: {pl_rt:.1f}% -> {step_str}")
 					
 					# [UI Feedback] 매집 상태 (Time-Cut 여부)
 					# 정밀도 상향 (90% -> 95%)
@@ -834,6 +865,60 @@ class MainApp:
 		
 		return time.time()
 
+	def _optimize_stock_count_by_budget(self):
+		"""
+		[AI Smart Count]
+		현재 예수금을 기준으로 '물타기를 끝까지 버틸 수 있는' 적정 종목 수를 역산하여 자동 설정합니다.
+		오직 REAL(실전) 모드에서만 동작하며, 사용자 설정을 스마트하게 보정합니다.
+		"""
+		try:
+		# 실전 모드 확인
+			if get_setting('use_mock_server', False) or get_setting('is_paper_trading', False):
+				# [Mock 모드 Safety] Mock 모드인데 종목 수가 1개면 테스트가 안되므로 5개로 복구
+				current_target = int(float(str(get_setting('target_stock_count', 5))))
+				if current_target <= 1:
+					save_setting('target_stock_count', 5)
+					logger.info("🧪 [Mock 모드 감지] 원활한 테스트를 위해 종목 수를 1개 -> 5개로 자동 확장합니다.")
+				return
+
+			# 1. 가용 현금 확인 (예수금)
+			deposit = int(get_setting('deposit', 0))
+			if deposit <= 0: return
+
+			# 2. 현재 설정된 종목 당 투자 비중 (기본 70%)
+			capital_ratio = float(get_setting('trading_capital_ratio', 70)) / 100.0
+			total_investable = deposit * capital_ratio # 총 운용 가능 금액
+
+			# 3. 1종목 완주(5회 물타기)에 필요한 예상 최소 비용
+			# 가정: 1주가 약 2,000원인 저가주 기준 (너무 비싼 주식은 애초에 매수가 안 되므로)
+			# 1차(1) + 2차(1) + 3차(2) + 4차(4) + 5차(8) = 총 16유닛
+			UNIT_PRICE_EST = 2000 # 2천원 짜리 주식 기준
+			TOTAL_UNITS = 1 + 1 + 2 + 4 + 8 # 16
+			
+			cost_per_stock_full_cycle = UNIT_PRICE_EST * TOTAL_UNITS # 한 종목당 약 32,000원 필요
+			
+			# 4. 역산: 몇 종목이나 버틸 수 있는가?
+			optimal_count = int(total_investable // cost_per_stock_full_cycle)
+			
+			# [Safety] 최소 1개, 최대 10개 제한
+			if optimal_count < 1: optimal_count = 1
+			if optimal_count > 10: optimal_count = 10
+			
+			# 5. 현재 설정과 비교하여 다르면 자동 보정
+			current_target = int(get_setting('target_stock_count', 5))
+			
+			if optimal_count != current_target:
+				logger.info(f"💡 [AI 예산 최적화] 예수금({deposit:,}원) 기준 적정 종목 수 재산정: {current_target}개 -> {optimal_count}개")
+				save_setting('target_stock_count', optimal_count)
+				
+				# 사용자 알림 (로그)
+				self.chat_command.send_telegram_message(f"💰 [자금 최적화] 예수금({deposit:,}원)에 맞춰 운용 종목 수를 {optimal_count}개로 자동 조정했습니다.")
+			else:
+				logger.info(f"✅ [예산 점검] 현재 예수금({deposit:,}원)으로 {current_target}개 종목 운용 가능함.")
+				
+		except Exception as e:
+			logger.error(f"예산 최적화 계산 중 오류: {e}")
+
 	async def run(self):
 		"""메인 실행 루프"""
 		logger.info("="*50)
@@ -844,6 +929,10 @@ class MainApp:
 		# [System Log] API Mode Logging
 		api_mode = get_current_api_mode()
 		mode_kr = "가상 서버 (Mock)" if api_mode == "Mock" else "실제 키움 (Real)"
+		
+		# [Smart Count] 시작 시에도 예산 점검
+		self._optimize_stock_count_by_budget()
+
 		logger.info(f"[시스템] 현재 실행 모드: {mode_kr}")
 		
 		# [초기 토큰 발급] 봇 실행 시 바로 로그인을 시도합니다.
@@ -1037,6 +1126,12 @@ class MainApp:
 						
 				# [Auto Mode Switcher] 시간 기반 Mock ↔ Real 자동 전환
 				await self.check_auto_mode_switch()
+				
+				# [AI Smart Count] Real 모드일 경우 상시 예산 최적화 (수동 전환 대응)
+				# 단, 너무 빈번한 호출을 막기 위해 10초에 한 번만 체크하거나, 
+				# _optimize 메서드 내부에서 값 변경 시에만 로그를 찍도록 되어 있으므로 안전함.
+				if not get_setting('use_mock_server', True):
+					self._optimize_stock_count_by_budget()
 
 				# 1분 통계 기록
 				now = datetime.datetime.now()

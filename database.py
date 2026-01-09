@@ -10,6 +10,9 @@ DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trading.db')
 async def init_db():
 	"""데이터베이스 및 테이블 초기화"""
 	async with aiosqlite.connect(DB_FILE) as db:
+		# WAL 모드 활성화 (핵심: 읽기/쓰기 동시성 확보)
+		await db.execute("PRAGMA journal_mode=WAL")
+		
 		# 매매 기록 테이블 (Enhanced for trading_log replacement)
 		await db.execute('''
 			CREATE TABLE IF NOT EXISTS trades (

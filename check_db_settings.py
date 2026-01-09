@@ -1,16 +1,19 @@
-import sqlite3
-import os
 
-db_path = 'trading.db'
-if os.path.exists(db_path):
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM settings WHERE key IN ('use_mock_server', 'is_paper_trading', 'trading_mode');")
-    rows = cursor.fetchall()
-    print("--- Current Settings in DB ---")
-    for row in rows:
-        print(f"{row['key']}: {row['value']}")
-    conn.close()
-else:
-    print("DB file not found")
+import sqlite3
+import json
+
+def check_settings():
+    try:
+        conn = sqlite3.connect('trading.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM settings")
+        rows = cursor.fetchall()
+        print("--- CURRENT SETTINGS IN DB ---")
+        for key, value in rows:
+            print(f"{key}: {value}")
+        conn.close()
+    except Exception as e:
+        print(f"Error checking settings: {e}")
+
+if __name__ == "__main__":
+    check_settings()

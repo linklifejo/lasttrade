@@ -212,6 +212,16 @@
             </div>
         </div>
 
+        <div class="section">
+            <h2>📊 트레이딩 전략 설정</h2>
+
+            <div class="field">
+                <label>목표 보유 종목 수 (Target Stock Count)</label>
+                <input type="number" id="target_stock_count" placeholder="예: 5" min="1" max="20">
+                <div class="desc">동시에 운용할 최대 종목 수 (예수금에 맞춰 자동 최적화될 수 있음)</div>
+            </div>
+        </div>
+
         <button class="btn" onclick="saveSettings()">💾 저장하기</button>
 
         <div class="status" id="status"></div>
@@ -231,6 +241,7 @@
                 document.getElementById('telegram_token').value = settings.telegram_token || '';
                 document.getElementById('telegram_chat_id').value = settings.telegram_chat_id || '';
                 document.getElementById('my_account').value = settings.my_account || '';
+                document.getElementById('target_stock_count').value = settings.target_stock_count || '5';
 
                 console.log('✅ 설정 로드 완료');
             } catch (e) {
@@ -238,6 +249,34 @@
                 showStatus('설정을 불러오는데 실패했습니다: ' + e.message, 'error');
             }
         });
+
+        // [UI Auto-Sync] 설정 자동 동기화 (1초마다 - 즉각 반응)
+        setInterval(syncSettings, 1000);
+
+        async function syncSettings() {
+            try {
+                // 저장 버튼이 눌려있을 때는 동기화 스킵 (사용자 입력 방해 방지)
+                const btn = document.querySelector('.btn');
+                if (btn.disabled) return;
+
+                const res = await fetch('/api/settings');
+                const settings = await res.json();
+
+                // 타겟 종목 수 동기화
+                const elTarget = document.getElementById('target_stock_count');
+                const newVal = settings.target_stock_count || '5';
+
+                if (elTarget.value != newVal) {
+                    // 값이 다를 때만 업데이트 (사용자가 입력 중이지 않을 때)
+                    if (document.activeElement !== elTarget) {
+                        elTarget.value = newVal;
+                        showStatus('🔄 [알림] 종목 수가 자동으로 업데이트 되었습니다 (' + newVal + '개)', 'success');
+                    }
+                }
+            } catch (e) {
+                // 조용히 실패
+            }
+        }
 
         async function saveSettings() {
             const btn = event.target;
@@ -252,7 +291,8 @@
                     paper_app_secret: document.getElementById('paper_app_secret').value,
                     telegram_token: document.getElementById('telegram_token').value,
                     telegram_chat_id: document.getElementById('telegram_chat_id').value,
-                    my_account: document.getElementById('my_account').value
+                    my_account: document.getElementById('my_account').value,
+                    target_stock_count: document.getElementById('target_stock_count').value
                 };
 
                 const res = await fetch('/api/settings', {
@@ -264,6 +304,10 @@
                 if (res.ok) {
                     showStatus('✅ 설정이 성공적으로 저장되었습니다!', 'success');
                     btn.textContent = '✅ 저장 완료!';
+
+                    // [UX] 저장 직후 서버에서 계산된 최신 값(종목 수 등)을 즉시 불러와서 화면 갱신
+                    await syncSettings();
+
                     setTimeout(() => {
                         btn.textContent = '💾 저장하기';
                         btn.disabled = false;
