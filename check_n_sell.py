@@ -205,17 +205,17 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# [위에서 계산된 cur_step 및 filled_ratio 재사용]
 			if cur_step > split_buy_cnt: cur_step = split_buy_cnt
 			# [Stable MAX logic] 
-			# filled_ratio 임계값을 상향(0.7->0.95)하여 조금 더 여유를 줌
-			is_max_bought = (cur_step >= split_buy_cnt) or (filled_ratio >= 0.95)
-			
-			# [CRITICAL Fix] 소량 보유 시 절대로 조기 손절시키지 않음 (물타기 기회 무조건 보장)
-			# 사용자 요청: "잘좀하자 계속하지 말고, 불필요한 손절 시키지 말고"
-			is_actually_max = is_max_bought
-			if single_strategy == "WATER":
-				if qty <= 5: # 5주 이하는 어떤 경우에도 MAX로 간주하지 않음 (손절 유예)
-					is_actually_max = False
-				elif cur_step < split_buy_cnt: # 단계 자체가 MAX 미만이면 비중과 무관하게 유예
-					is_actually_max = False
+			# [Early Stop Logic] 사용자 설정값(Early Stop Step) 적용
+			# 기본값: 설정 없으면 '분할횟수-1' (자동)
+			try:
+				default_early = split_buy_cnt - 1
+				if default_early < 1: default_early = 1
+				early_stop_step = int(cached_setting('early_stop_step', default_early))
+			except:
+				early_stop_step = split_buy_cnt - 1
+				
+			# 현재 단계가 '조기 손절 단계' 이상이면 손절 조건 체크
+			is_actually_max = (cur_step >= early_stop_step)
 
 
 

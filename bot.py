@@ -171,6 +171,12 @@ class MainApp:
 
 			# [AI Smart Count] 장 시작 시 예산에 맞게 종목 수 자동 최적화
 			self._optimize_stock_count_by_budget()
+
+			# [Auto Tuning] 예산에 맞게 분할 매수 횟수(Step) 자동 최적화 (사장님 요청 기능)
+			try:
+				result = subprocess.run([sys.executable, 'optimize_settings.py'], cwd=os.path.dirname(os.path.abspath(__file__)), capture_output=True, text=True, timeout=30)
+				if result.stdout: logger.info(f"[AutoTune] {result.stdout.strip()}")
+			except Exception as e: logger.error(f"[AutoTune] 실행 실패: {e}")
 		
 		# 1. 자동 시작 처리
 		# Mock 모드이거나 장중이면 자동 시작
