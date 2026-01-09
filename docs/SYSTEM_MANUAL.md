@@ -3,6 +3,58 @@
 > **Core Philosophy**: "Server is Server." 
 > 핵심 로직은 UI와 독립적으로 작동하며, 원칙(Principles)을 최우선으로 수행한다.
 
+## 🗺️ 시스템 아키텍처 다이어그램
+
+![LASTTRADE System Architecture](images/architecture.png)
+
+### 📐 구조도 (Mermaid Code)
+
+```mermaid
+graph TD
+    %% 스타일 정의
+    classDef server fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef client fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef infra fill:#f5f5f5,stroke:#616161,stroke-width:2px;
+    classDef db fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,shape:cylinder;
+
+    subgraph Infrastructure [🛡️ Infrastructure (운영/관리)]
+        direction TB
+        START(start.py) --> WD(watchdog.py)
+        STOP(stop.py)
+    end
+
+    subgraph Server [🧠 Trading Core (Server)]
+        direction TB
+        BOT(bot.py) --> BUY(check_n_buy.py)
+        BOT --> SELL(check_n_sell.py)
+        BOT --> OPT(optimize_settings.py)
+        BUY --> K(kiwoom_adapter.py)
+        SELL --> K
+    end
+
+    subgraph Client [🖥️ Web Dashboard (Client)]
+        direction TB
+        WEB(web_server.py) --> RT(rt_search.py) --> UI[Browser / index.html]
+    end
+
+    DB[(trading.db)]
+
+    %% 관계 정의
+    START --> BOT
+    START --> WEB
+    WD -.->|Heartbeat 감시| BOT
+    WD -.->|Heartbeat 감시| WEB
+    
+    K -->|Direct Access| DB
+    RT -.->|Read Only (Loose Coupling)| DB
+
+    %% 클래스 적용
+    class BOT,BUY,SELL,OPT,K server;
+    class WEB,RT,UI client;
+    class START,WD,STOP infra;
+    class DB db;
+```
+
 ---
 
 ## 🏗️ 1. 시스템 아키텍처 (System Architecture)
