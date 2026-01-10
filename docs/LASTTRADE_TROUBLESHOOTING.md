@@ -1,5 +1,13 @@
 # 🔧 트러블슈팅 가이드
 
+## 🚨 [월요일 긴급 점검: 2026-01-12] 미체결 조회 함수
+*   **리스크**: `kiwoom_adapter.py`에 새로 추가된 `get_outstanding_orders` (미체결 조회) 함수가 실전(Real) API 환경에서 에러를 일으킬 가능성이 있음 (Mock에서만 테스트됨).
+*   **증상**: 로그에 `AttributeError` 또는 `API 호출 실패`가 뜨거나, 봇이 주문 전에 멈칫거림.
+*   **조치**: 
+    1.  `c:\lasttrade\kiwoom_adapter.py` 열기.
+    2.  `fn_kt00007` 함수 내부를 `try-except`로 감싸서 무조건 `return []` 하도록 긴급 패치.
+    3.  일단 미체결 확인 기능 끄고(봇 안 죽게) 장 마감 후 확인.
+
 ---
 
 ## 📋 **목차**
@@ -755,27 +763,25 @@ CMD:
 
 ### **문서 참고:**
 ```
-1. 전략별_설정_팩터_기술서.md
-2. 불타기_물타기_전략_가이드.md
-3. 미체결_로직_기술서.md
-4. README.md
+1. LASTTRADE_STRATEGY_GUIDE.md (전략 상세)
+2. SYSTEM_MANUAL.md (시스템 구조)
+3. README.md
 ```
 
 ### **스크립트 활용:**
 ```
 상태 확인:
-  - check_internal_status.py
-  - check_db_settings.py
-  - show_outstanding.py
+  - check_real_balance_now.py (자산확인)
+  - check_db.py (DB설정)
+  - inspect_sells.py (매도분석)
 
 긴급 조치:
-  - emergency_cancel.py
-  - sell_all_stocks.py
-  - stop.py
+  - force_sell_max.py (전량매도)
+  - stop.py (시스템 종료)
 ```
 
 ---
 
-**마지막 업데이트:** 2025-12-26
+**마지막 업데이트:** 2026-01-10
 
 **이 가이드로 대부분의 문제를 해결할 수 있습니다. 해결 안 되면 로그를 확인하세요!** 🔍

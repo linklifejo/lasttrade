@@ -205,6 +205,25 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# [위에서 계산된 cur_step 및 filled_ratio 재사용]
 			if cur_step > split_buy_cnt: cur_step = split_buy_cnt
 			# [Stable MAX logic] 
+			
+			# [Step Info 생성] 매도 사유에 포함될 최종 단계 문자열
+			step_info = f"{cur_step}차"
+			if cur_step >= split_buy_cnt: step_info = "MAX"
+
+			# --------------------------------------------------------------------------------
+			# [PRIORITY 0] 상한가/급등 매도 (최우선 순위)
+			# --------------------------------------------------------------------------------
+			if not should_sell:
+				ul_val = cached_setting('upper_limit_rate', 29.5) # [Safety] 29.5 복구
+				try: UPPER_LIMIT = float(ul_val)
+				except: UPPER_LIMIT = 29.5
+				
+				# [Double Check] API수익률 OR 실시간계산수익률 둘 중 하나라도 만족하면 매도
+				if pl_rt >= UPPER_LIMIT:
+					should_sell = True
+					sell_reason = f"상한가({step_info})"
+					logger.info(f"🚀 [LASTTRADE 상한가] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도 (Priority 0)")
+
 			# [Early Stop Logic] 사용자 설정값(Early Stop Step) 적용
 			# 기본값: 설정 없으면 '분할횟수-1' (자동)
 			try:
@@ -217,14 +236,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# 현재 단계가 '조기 손절 단계' 이상이면 손절 조건 체크
 			is_actually_max = (cur_step >= early_stop_step)
 
-
-
-			# [Step Info 생성] 매도 사유에 포함될 최종 단계 문자열
-			step_info = f"{cur_step}차"
-			if cur_step >= split_buy_cnt: step_info = "MAX"
-
 			# [Time-Cut 로직]
-			if held_since and stock_code in held_since:
+			if not should_sell and held_since and stock_code in held_since:
+
 				elapsed_sec = time.time() - held_since[stock_code]
 				time_cut_limit = TIME_CUT_MINUTES * 60
 				
@@ -263,16 +277,6 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					should_sell = True
 					sell_reason = f"전역손절({step_info}/{pl_rt}%)"
 					logger.warning(f"🚨 [전역 손절] {stock_name}: {pl_rt}% <= {GLOBAL_SL_VAL}%")
-
-			# 3. [상한가 매도]
-			if not should_sell:
-				ul_val = cached_setting('upper_limit_rate', 29.5)
-				try: UPPER_LIMIT = float(ul_val)
-				except: UPPER_LIMIT = 29.5
-				if pl_rt >= UPPER_LIMIT:
-					should_sell = True
-					sell_reason = f"상한가({step_info})"
-					logger.info(f"🚀 [LASTTRADE 상한가] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도")
 
 			# 4. [일반 익절]
 			if not should_sell:

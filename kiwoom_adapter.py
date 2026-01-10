@@ -199,6 +199,19 @@ def fn_opw00007(token=None) -> List[Dict]:
         return []
 
 
+def fn_kt00007(token=None) -> List[Dict]:
+    """미체결 내역 조회 (get_outstanding_orders)"""
+    if token is None:
+        token = fn_au10001()
+    
+    api = get_api()
+    if hasattr(api, 'get_outstanding_orders'):
+        return api.get_outstanding_orders(token)
+    else:
+        # 미지원 시 빈 리스트 반환 (안전을 위해)
+        return []
+
+
 # ========== Mock 전용 테스트 함수 ==========
 
 def mock_reset_account(initial_cash: int = 10000000):
@@ -257,3 +270,4 @@ buy_stock = fn_kt10000
 sell_stock = fn_kt10001
 get_bid_price = fn_ka10004
 get_trade_history = fn_opw00007
+get_outstanding_orders = fn_kt00007
