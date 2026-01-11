@@ -88,8 +88,8 @@ def perform_learning(trades, signals, candles):
     logger.info("  💡 [원칙] RSI 등 제외된 팩터의 가중치를 낮추고 평단가/단계 분석에 집중")
     
     # [대원칙 적용] 승률 계산 시 WATER 전략의 특성 반영
-    buy_trades = [t for t in trades if t['type'] == 'BUY']
-    sell_trades = [t for t in trades if t['type'] == 'SELL']
+    buy_trades = [t for t in trades if t['type'].upper() == 'BUY']
+    sell_trades = [t for t in trades if t['type'].upper() == 'SELL']
     
     win_count = sum(1 for t in sell_trades if t['profit_rate'] and t['profit_rate'] > 0)
     total_sells = len(sell_trades)
