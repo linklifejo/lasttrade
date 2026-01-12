@@ -160,9 +160,9 @@ class ChatCommand:
 			logger.error(f"설정 업데이트 실패: {e}", exc_info=True)
 			return False
 	
-	async def start(self):
+	async def start(self, force=False):
 		"""start 명령어를 처리합니다."""
-		if self.rt_search.connected:
+		if self.rt_search.connected and not force:
 			logger.info("이미 실시간 검색이 실행 중입니다. 중복 시작을 건너뜁니다.")
 			return True
 			

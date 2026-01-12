@@ -656,6 +656,7 @@ class RealTimeSearch:
 		Returns:
 			bool: 성공 여부
 		"""
+		self.last_msg_time = time.time()  # [Fix] 시작 시 수신 시간 초기화
 		logger.info(f"🚀 [RT_SEARCH] start() 호출됨 (Token: {str(token)[:10]}...)")
 		try:
 			# [Mock Server Support] Mock 모드인지 확인

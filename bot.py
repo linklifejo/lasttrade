@@ -145,6 +145,7 @@ class MainApp:
 			self.today_stopped = False
 			self.today_learned = False # [NEW] 학습 플래그 리셋
 			self.market_open_notified = False # [Fix] 장전 알림 플래그 리셋
+			self.manual_stop = False # [Fix] 날짜 변경 시 수동 정지 플래그 해제 (자동 시작 보장)
 			self.last_check_date = today
 			
 			# [NEW] 새로운 날 시작 시 전일 데이터 정리 (Non-blocking)
@@ -953,7 +954,7 @@ class MainApp:
 			
 		# [자동 시작] 프로그램 실행 시 즉시 시작 (User requirement)
 		logger.info("[Startup] 시스템 자동 시작...")
-		await self.chat_command.start()
+		await self.chat_command.start(force=True)
 		self.today_started = True
 
 		# [Startup] Generate initial report (Trading Logs & Assets)
@@ -1030,10 +1031,10 @@ class MainApp:
 						else:
 							logger.warn("⚠️ [Watchdog] 검색 엔진 연결 끊김 감지! 재연결을 시도합니다.")
 						
-						# 확실한 재시작을 위해 stop 호출 후 start
+						# 확실한 재시작을 위해 stop 호출 후 start(force=True)
 						await self.chat_command.stop(set_auto_start_false=False)
 						await asyncio.sleep(2)
-						await self.chat_command.start() # 인자 제거
+						await self.chat_command.start(force=True) # force 플래그 추가
 						
 						if not rt.connected:
 							logger.error("❌ [Watchdog] 검색 엔진 재연결 실패. 다음 루프에서 재시도합니다.")
