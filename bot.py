@@ -147,24 +147,18 @@ class MainApp:
 			self.market_open_notified = False # [Fix] 장전 알림 플래그 리셋
 			self.last_check_date = today
 			
-			# [NEW] 새로운 날 시작 시 전일 데이터 정리
+			# [NEW] 새로운 날 시작 시 전일 데이터 정리 (Non-blocking)
 			logger.info("🧹 새로운 날 감지 - 전일 데이터 정리 시작")
-			try:
-				import subprocess
-				import sys
-				result = subprocess.run(
-					[sys.executable, 'cleanup_daily.py'],
-					cwd=os.path.dirname(os.path.abspath(__file__)),
-					capture_output=True,
-					text=True,
-					timeout=60
-				)
-				if result.returncode == 0:
-					logger.info("✅ 전일 데이터 정리 완료")
-				else:
-					logger.error(f"⚠️ 데이터 정리 실패: {result.stderr}")
-			except Exception as e:
-				logger.error(f"⚠️ 데이터 정리 오류: {e}")
+			def run_cleanup():
+			    try:
+			        import subprocess
+			        import sys
+			        subprocess.run([sys.executable, 'cleanup_daily.py'], cwd=os.path.dirname(os.path.abspath(__file__)), timeout=60)
+			        logger.info("✅ 전일 데이터 정리 완료")
+			    except Exception as e:
+			        logger.error(f"⚠️ 데이터 정리 오류: {e}")
+			
+			asyncio.get_event_loop().run_in_executor(None, run_cleanup)
 
 			# [AI Smart Count] 장 시작 시 예산에 맞게 종목 수 자동 최적화
 			self._optimize_stock_count_by_budget()
@@ -226,29 +220,21 @@ class MainApp:
 			self.today_learned = get_setting('ai_learned_today', '') == str(MarketHour.get_today_date())
 			
 			if MarketHour.is_market_end_time() and not self.today_learned:
-				logger.info("🤖 AI 학습 시작 (자동 스케줄링)")
-				try:
-					import subprocess
-					import sys
-					# 봇이 돌고 있는 상태에서 백그라운드로 학습 실행
-					result = subprocess.run(
-						[sys.executable, 'learn_daily.py'],
-						cwd=os.path.dirname(os.path.abspath(__file__)),
-						capture_output=True,
-						text=True,
-						timeout=300  # 5분 타임아웃
-					)
-					if result.returncode == 0:
-						logger.info("✅ AI 학습 완료")
-						# DB에 학습 완료 날짜 저장
-						save_setting('ai_learned_today', str(MarketHour.get_today_date()))
-						self.today_learned = True 
-						if result.stdout:
-							logger.info(f"학습 결과:\n{result.stdout}")
-					else:
-						logger.error(f"⚠️ AI 학습 실패: {result.stderr}")
-				except Exception as e:
-					logger.error(f"⚠️ AI 학습 오류: {e}")
+				logger.info("🤖 AI 학습 시작 (백그라운드 실행)")
+				def run_learning():
+				    try:
+				        import subprocess
+				        import sys
+				        result = subprocess.run([sys.executable, 'learn_daily.py'], cwd=os.path.dirname(os.path.abspath(__file__)), capture_output=True, text=True, timeout=600)
+				        if result.returncode == 0:
+				            logger.info("✅ AI 학습 완료")
+				            save_setting('ai_learned_today', str(MarketHour.get_today_date()))
+				        else:
+				            logger.error(f"⚠️ AI 학습 실패: {result.stderr}")
+				    except Exception as e:
+				        logger.error(f"⚠️ AI 학습 오류: {e}")
+				
+				asyncio.get_event_loop().run_in_executor(None, run_learning)
 		
 		# 4. [NEW] 시간 기반 자동 모드 전환 (Mock ↔ Real)
 		await self.check_auto_mode_switch()
@@ -1034,7 +1020,9 @@ class MainApp:
 					rt = self.chat_command.rt_search
 					# 1. 아예 연결이 끊긴 경우
 					# 2. 연결은 되어있으나 30초 이상 데이터(Recv)가 없는 경우 (좀비 연결)
-					is_zombie = rt.connected and (time.time() - getattr(rt, 'last_msg_time', 0) > 30)
+					#    [Fix] Mock 모드에서는 데이터 수신이 불규칙하므로 좀비 체크 타임아웃을 5분으로 늘림
+					zombie_timeout = 300 if get_current_api_mode() == "Mock" else 30
+					is_zombie = rt.connected and (time.time() - getattr(rt, 'last_msg_time', 0) > zombie_timeout)
 					
 					if not rt.connected or is_zombie:
 						if is_zombie:
@@ -1045,7 +1033,7 @@ class MainApp:
 						# 확실한 재시작을 위해 stop 호출 후 start
 						await self.chat_command.stop(set_auto_start_false=False)
 						await asyncio.sleep(2)
-						await self.chat_command.start(False) # show_msg=False
+						await self.chat_command.start() # 인자 제거
 						
 						if not rt.connected:
 							logger.error("❌ [Watchdog] 검색 엔진 재연결 실패. 다음 루프에서 재시도합니다.")

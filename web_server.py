@@ -238,7 +238,7 @@ async def get_trading_log(since_id: int = 0):
         else:
             mode = "PAPER" if is_paper else "REAL"
         
-        logger.debug(f"📊 [API/trading-log] 모드 감지: {mode} (use_mock={use_mock}, is_paper={is_paper})")
+        # logger.debug(f"📊 [API/trading-log] 모드 감지: {mode} (use_mock={use_mock}, is_paper={is_paper})")
         
         import datetime
         today_str = datetime.datetime.now().strftime('%Y-%m-%d')
