@@ -169,9 +169,6 @@ class MainApp:
 			# [AI Smart Count] 장 시작 시 예산에 맞게 종목 수 자동 최적화
 			self._optimize_stock_count_by_budget()
 
-			# [AI Smart Count] 장 시작 시 예산에 맞게 종목 수 자동 최적화
-			self._optimize_stock_count_by_budget()
-
 			# [Auto Tuning] 예산에 맞게 분할 매수 횟수(Step) 자동 최적화 (사장님 요청 기능)
 			try:
 				result = subprocess.run([sys.executable, 'optimize_settings.py'], cwd=os.path.dirname(os.path.abspath(__file__)), capture_output=True, text=True, timeout=30)
@@ -225,30 +222,33 @@ class MainApp:
 			await self.chat_command.report()  # 장 종료 시 report도 자동 발송
 			self.today_stopped = True  # 오늘 stop 실행 완료 표시
 
-		# 3. [NEW] AI 학습 통합 처리 (Mock 포함 모든 모드 15:40에 실행)
-		if MarketHour.is_market_end_time() and not self.today_learned:
-			logger.info("🤖 AI 학습 시작 (자동 스케줄링)")
-			try:
-				import subprocess
-				import sys
-				# 봇이 돌고 있는 상태에서 백그라운드로 학습 실행
-				result = subprocess.run(
-					[sys.executable, 'learn_daily.py'],
-					cwd=os.path.dirname(os.path.abspath(__file__)),
-					capture_output=True,
-					text=True,
-					timeout=300  # 5분 타임아웃
-				)
-				if result.returncode == 0:
-					logger.info("✅ AI 학습 완료")
-					if result.stdout:
-						logger.info(f"학습 결과:\n{result.stdout}")
-				else:
-					logger.error(f"⚠️ AI 학습 실패: {result.stderr}")
-			except Exception as e:
-				logger.error(f"⚠️ AI 학습 오류: {e}")
+			# [NEW] 오늘 AI 학습이 완료되었는지 확인 (DB 기반)
+			self.today_learned = get_setting('ai_learned_today', '') == str(MarketHour.get_today_date())
 			
-			self.today_learned = True  # 학습 완료 표시
+			if MarketHour.is_market_end_time() and not self.today_learned:
+				logger.info("🤖 AI 학습 시작 (자동 스케줄링)")
+				try:
+					import subprocess
+					import sys
+					# 봇이 돌고 있는 상태에서 백그라운드로 학습 실행
+					result = subprocess.run(
+						[sys.executable, 'learn_daily.py'],
+						cwd=os.path.dirname(os.path.abspath(__file__)),
+						capture_output=True,
+						text=True,
+						timeout=300  # 5분 타임아웃
+					)
+					if result.returncode == 0:
+						logger.info("✅ AI 학습 완료")
+						# DB에 학습 완료 날짜 저장
+						save_setting('ai_learned_today', str(MarketHour.get_today_date()))
+						self.today_learned = True 
+						if result.stdout:
+							logger.info(f"학습 결과:\n{result.stdout}")
+					else:
+						logger.error(f"⚠️ AI 학습 실패: {result.stderr}")
+				except Exception as e:
+					logger.error(f"⚠️ AI 학습 오류: {e}")
 		
 		# 4. [NEW] 시간 기반 자동 모드 전환 (Mock ↔ Real)
 		await self.check_auto_mode_switch()
@@ -295,10 +295,16 @@ class MainApp:
 				self._optimize_stock_count_by_budget()
 				
 				logger.info("✅ Real 서버로 전환 완료 - 실전 매매 활성화")
-				# [New] 전환 후 즉시 다음 루프에서 자동 시작되도록 플래그 보정
+				
+				# [Fix] 엔진 재시작 및 플래그 초기화 (중요: REAL 시그널 수신을 위함)
+				self.today_started = False
 				self.manual_stop = False
-				from database_helpers import save_setting
 				save_setting('auto_start', True)
+				
+				# 기존 검색 엔진 정지 (그래야 다음 루프에서 start()가 호출됨)
+				if self.chat_command.rt_search.connected:
+					logger.info("🔄 기존 검색 엔진(Mock) 중지 중...")
+					await self.chat_command.rt_search.stop()
 			
 			# Real → Mock 전환 (장 마감 시간 이후 & 아직 Real인 경우)
 			elif current_time >= mock_switch_time and current_mode != "Mock":
@@ -321,6 +327,16 @@ class MainApp:
 				reset_api()
 				
 				logger.info("✅ Mock 서버로 전환 완료 - 테스트 모드 복귀")
+				
+				# [Fix] 엔진 재시작 유도
+				self.today_started = False
+				self.manual_stop = False
+				save_setting('auto_start', True)
+				
+				# 기존 검색 엔진 정지
+				if self.chat_command.rt_search.connected:
+					logger.info("🔄 기존 검색 엔진(Real) 중지 중...")
+					await self.chat_command.rt_search.stop()
 		
 		except Exception as e:
 			logger.error(f"⚠️ 자동 모드 전환 오류: {e}")
@@ -1012,6 +1028,28 @@ class MainApp:
 				# 장 시작/종료 시간 확인
 				await self.check_market_timing()
 				
+				# [Watchdog] 실시간 검색 엔진 연결 상태 감시 및 복구
+				# 장 시간이고, 자동 시작 상태인데 연결이 끊겨있거나 데이터가 안 온다면 재시작
+				if self.today_started and MarketHour.is_market_buy_time() and not self.manual_stop:
+					rt = self.chat_command.rt_search
+					# 1. 아예 연결이 끊긴 경우
+					# 2. 연결은 되어있으나 30초 이상 데이터(Recv)가 없는 경우 (좀비 연결)
+					is_zombie = rt.connected and (time.time() - getattr(rt, 'last_msg_time', 0) > 30)
+					
+					if not rt.connected or is_zombie:
+						if is_zombie:
+							logger.warn(f"⚠️ [Watchdog] 좀비 연결 감지 (마지막 수신: {time.time() - rt.last_msg_time:.1f}초 전). 재연결 시도!")
+						else:
+							logger.warn("⚠️ [Watchdog] 검색 엔진 연결 끊김 감지! 재연결을 시도합니다.")
+						
+						# 확실한 재시작을 위해 stop 호출 후 start
+						await self.chat_command.stop(set_auto_start_false=False)
+						await asyncio.sleep(2)
+						await self.chat_command.start(False) # show_msg=False
+						
+						if not rt.connected:
+							logger.error("❌ [Watchdog] 검색 엔진 재연결 실패. 다음 루프에서 재시도합니다.")
+				
 				# [Token Auto-Renewal] 토큰 자동 갱신 (4시간마다 또는 날짜 변경 시)
 				try:
 					current_time = time.time()
@@ -1029,8 +1067,8 @@ class MainApp:
 				except Exception as e:
 					logger.error(f"토큰 갱신 실패: {e}")
 
-				# [Throttling] 루프 속도 조절 (CPU 및 DB 지연 방지)
-				await asyncio.sleep(0.5)
+				# [Throttling] 루프 속도 조절 (CPU 및 DB 지연 방지) - 반응성 위해 대폭 단축
+				await asyncio.sleep(0.05)
 
 				# [Web Dashboard] 웹 대시보드에서 명령어 확인
 				# logger.debug("Checking web commands...")
@@ -1055,9 +1093,9 @@ class MainApp:
 
 				
 				# [추가] 보유 종목 물타기/관리 및 모니터링 루프 (Dynamic Rate Limit)
-				# [Fix] 실전/모의투자 시 호출 제한 방지를 위해 간격 확대 (4.0 -> 8.0) -> [Revert] TS 반응성 위해 1.0초로 단축
+				# [Fix] 실전/모의투자 시 호출 제한 방지를 위해 간격 확대 (4.0 -> 8.0) -> [Revert] TS 반응성 위해 0.2초로 단축
 				# (보유 종목이 적을 때는 API 제한에 걸리지 않으므로 빠른 대응 우선)
-				limit_interval = 1.0
+				limit_interval = 0.2
 				if time.time() - last_json_update > limit_interval:
 
 					try:
@@ -1075,9 +1113,9 @@ class MainApp:
 						current_stocks, current_balance, balance_data = await self._update_market_data(loop)
 						self._send_heartbeat() # 작업 직후 신호
 						
-						# [Fix] 데이터가 정상적으로 전달되지 않았을 경우 이번 루프 스킵
+						# [Fix] 데이터가 정상적으로 전달되지 않았을 경우 이번 루프 즉시 패스 (지연 방지)
 						if current_stocks is None or balance_data is None:
-							await asyncio.sleep(2)
+							await asyncio.sleep(0.1)
 							continue
 							
 						deposit_amt = balance_data.get('deposit', 0)

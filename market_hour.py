@@ -120,11 +120,15 @@ class MarketHour:
 		# 1. 사용자 설정 시간 체크
 		h, m = cls.get_liquidation_time()
 		user_end = cls._get_market_time(h, m)
-		is_user_time = (now >= user_end and (now - user_end).seconds < 60)
+		
+		# [Fix] now >= user_end 이면서 차이가 60초 이내인 경우만 True (초 단위 오차 방지)
+		diff_user = (now - user_end).total_seconds()
+		is_user_time = (0 <= diff_user < 60)
 		
 		# 2. 실제 장 마감 시간(15:30) 체크 (안전장치)
 		real_end = cls._get_market_time(cls.MARKET_END_HOUR, cls.MARKET_END_MINUTE)
-		is_real_time = (now >= real_end and (now - real_end).seconds < 60)
+		diff_real = (now - real_end).total_seconds()
+		is_real_time = (0 <= diff_real < 60)
 		
 		return is_user_time or is_real_time
 	@classmethod

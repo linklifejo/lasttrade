@@ -458,7 +458,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # 2초마다 상태 전송 (부하 감소 및 데이터 일관성)
+            # [Fix] 대시보드 반응성 강화를 위해 갱신 주기를 0.3초로 단축 (사용자 체감 슬립 제거)
             try:
                 from database_helpers import get_current_status, get_setting
                 
@@ -468,15 +468,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 mode = "MOCK" if use_mock else ("PAPER" if is_paper else "REAL")
                 
                 # 2. 통합된 상태 조회 함수 사용 (DB값 대신 실시간 값)
-                # 이로써 REST API와 WebSocket이 동일한 로직(매수 횟수 카운트 등)을 공유하게 됨
                 loop = asyncio.get_running_loop()
                 data = await loop.run_in_executor(None, get_current_status, mode)
                 
                 if data:
                     await websocket.send_json(data)
             except Exception as e:
-                pass # 연결 종료 등 예외 처리
-            await asyncio.sleep(2.0)
+                pass 
+            await asyncio.sleep(0.3)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

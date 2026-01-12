@@ -1396,9 +1396,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateTime();
     setInterval(updateTime, 1000);
 
-    // Refresh data periodically (1초 간격으로 가속 - 민감도 극대화)
-    setInterval(fetchStatus, 1000);
-    setInterval(loadTradingLog, 1000);
+    // [Fix] 갱신 주기 단축 (0.5s) - 반응성 강화
+    setInterval(fetchStatus, 500);
+    setInterval(loadTradingLog, 500);
 
     // -- Settings Management (단일 버튼 통합) --
     document.getElementById('save-settings')?.addEventListener('click', saveSettings);

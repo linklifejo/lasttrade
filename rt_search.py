@@ -43,6 +43,7 @@ class RealTimeSearch:
 		self.time_cut_cooldown = {} # [Time-Cut Fix] Time-Cut 매도 후 재매수 방지 {code: timestamp}
 		self.pending_orders = {} # [New] 체결 확인 대기 목록 {code: timestamp}
 		self.response_manager = None # [Math] 대응 데이터 추적기
+		self.last_msg_time = time.time()  # [Watchdog Fix] 마지막 수신 시간 초기화
 		
 		# [동시성 제어] 후보군 처리 프로세스 락 (중복 매수 방지)
 		self.candidates_lock = asyncio.Lock()
@@ -53,13 +54,40 @@ class RealTimeSearch:
 		self.recently_sold[code] = time.time()
 		logger.info(f"[Sold Register] {code} 매도 처리 등록 (Ghost 방지 시작)")
 
+	async def register_stocks_realtime(self, codes):
+		"""보유 종목(또는 특정 종목)을 서버에 실시간 시세 등록(SetRealReg) 요청합니다."""
+		if not self.connected or not self.websocket:
+			return
+		
+		if not codes:
+			logger.info("📡 [SetRealReg] 등록할 종목 코드가 비어 있습니다.")
+			return
+
+		# 종목 코드가 리스트나 집합이면 세미콜론(;)으로 연결
+		if isinstance(codes, (list, set)):
+			codes_str = ";".join([str(c).replace('A', '') for c in codes])
+		else:
+			codes_str = str(codes).replace('A', '')
+
+		param = {
+			'trnm': 'REALREG', # 많은 Kiwoom Bridge에서 사용하는 SetRealReg 맵핑명
+			'codes': codes_str
+		}
+		
+		try:
+			await self.send_message(message=param)
+			logger.info(f"📡 [SetRealReg] 보유 종목 실시간 등록 요청 전송: {codes_str}")
+		except Exception as e:
+			logger.error(f"[SetRealReg] 요청 중 오류 발생: {e}")
+
 	async def connect(self, token):
 		"""WebSocket 서버에 연결합니다."""
 		try:
 			self.token = token  # 토큰 저장
+			logger.info(f"🌐 [RT_SEARCH] connect() 시도 중... URL: {self.socket_url}")
 			self.websocket = await websockets.connect(self.socket_url)
 			self.connected = True
-			logger.info("서버와 연결을 시도 중입니다.")
+			logger.info("✅ [RT_SEARCH] WebSocket 연결 성공")
 
 			# 로그인 패킷
 			param = {
@@ -91,6 +119,7 @@ class RealTimeSearch:
 
 	async def receive_messages(self):
 		"""서버에서 오는 메시지를 수신하여 출력합니다."""
+		logger.info("🚀 [RT_SEARCH] 메시지 수신 루프 시작")
 		while self.keep_running and self.connected and self.websocket:
 			raw_message = None
 			try:
@@ -365,6 +394,10 @@ class RealTimeSearch:
 			if real_new_stocks:
 				logger.info(f"[Sync] 외부 매수 감지 및 체결 확인: {real_new_stocks} -> 보유 목록 추가")
 				self.purchased_stocks.update(real_new_stocks)
+				
+				# [New] 새로운 종목이 감지되었으므로 실시간 등록(SetRealReg) 갱신
+				# 비동기 함수이므로 태스크로 실행
+				asyncio.create_task(self.register_stocks_realtime(list(self.purchased_stocks)))
 			
 			# 사라진 종목 (수동 매도 등)
 			# 단, 매수 진행 중(buying_stocks)이거나 검증 대기(pending_orders)인 종목은 제외
@@ -400,6 +433,9 @@ class RealTimeSearch:
 						import check_n_buy
 						check_n_buy.last_sold_times[s] = time.time()
 					except: pass
+				
+				# [New] 종목이 매도되어 사라졌으므로 실시간 등록 리스트 갱신
+				asyncio.create_task(self.register_stocks_realtime(list(self.purchased_stocks)))
 			
 			# [추가] 빈 자리가 감지되면 대기열 확인 및 매수 실행
 			# update_held_stocks는 자리를 비우는 역할을 하므로, 자리가 났을 때 대기열 처리를 트리거해줍니다.
@@ -495,8 +531,14 @@ class RealTimeSearch:
 			# Priority Sort (Rate Descending)
 			sorted_items = []
 			if isinstance(self.candidate_queue, dict):
-				# (code, (rate, data)) -> sort by rate
-				sorted_items = sorted(self.candidate_queue.items(), key=lambda x: x[1][0] if isinstance(x[1], tuple) else x[1], reverse=True)
+				# [Priority Logic] 등락률(rate) + 체결강도(strength/100) 복합 점수로 정렬
+				# 가장 '쎈' 종목(힘과 상승폭의 결합)을 우선 선정합니다.
+				def get_score(item):
+					rate, data = item[1] if isinstance(item[1], tuple) else (item[1], {})
+					strength = data.get('strength', 100.0) # 없으면 기본 100%
+					return rate + (strength / 100.0)
+				
+				sorted_items = sorted(self.candidate_queue.items(), key=get_score, reverse=True)
 			else:
 				sorted_items = [(x, (0, {})) for x in self.candidate_queue]
 			
@@ -575,6 +617,9 @@ class RealTimeSearch:
 							if self.held_since_ref is not None:
 								self.held_since_ref[code] = time.time()
 								logger.info(f"[Time-Cut] {code} 타이머 즉시 등록 (신규 매수)")
+							
+							# [New] 매수 성공 즉시 실시간 등록(SetRealReg) 갱신
+							asyncio.create_task(self.register_stocks_realtime(list(self.purchased_stocks)))
 					finally:
 						self.buying_stocks.discard(code)
 					

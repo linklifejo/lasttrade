@@ -430,18 +430,21 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	
 	# 1. 가중치 생성 (Rule: 1:1:2:2:4:4...)
 	split_cnt_int = int(split_cnt)
+	# [New] 조기 손절 단계 고려 (사용자 요청: 조기 손절이 4단계면 4단계 기준으로 비중 계산)
+	# 설정이 없으면 관례적으로 전체 단계 - 1을 사용합니다.
+	early_stop_step = int(get_setting('early_stop_step', split_cnt_int - 1))
+	if early_stop_step <= 0: early_stop_step = split_cnt_int
+
 	weights = []
 	for i in range(split_cnt_int):
-		# [수정] 사용자 요청에 따라 완벽한 배수 수열 적용 (1, 1, 2, 4, 8, 16...)
-		# i=0 -> 2^0 = 1
-		# i=1 -> 2^0 = 1
-		# i=2 -> 2^1 = 2
-		# i=3 -> 2^2 = 4
-		if i == 0: weight = 1
-		else: weight = 2**(i - 1)
+		# [수정] 사용자 요청에 따라 1:1:2:2:4:4 수열 적용
+		weight = 2**(i // 2)
 		weights.append(weight)
 			
-	total_weight = sum(weights)
+	# [중요] 비중 계산의 분모(Total Weight)를 조기 손절 단계(예: 4차)까지만 합산
+	# 이렇게 하면 조기 손절 단계에 도달했을 때 할당 자금의 100%가 투입됩니다.
+	total_weight = sum(weights[:early_stop_step])
+	if total_weight <= 0: total_weight = sum(weights) # Fallback
 	
 	# 2. 누적 목표 비율 계산
 	cumulative_ratios = []
@@ -450,10 +453,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		current_sum += w
 		cumulative_ratios.append(current_sum / total_weight)
 		
-	# 3. 로직 적용
-	one_shot_amt = 0
-	is_custom_ratio = True # 이제 항상 커스텀 비율 로직 사용
-	logger.info(f"분할 매수 {split_cnt_int}회 설정 -> 가중치 {weights} (비율: {[f'{r*100:.1f}%' for r in cumulative_ratios]}) 적용")
+	logger.info(f"분할 매수 {split_cnt_int}회 (기준:{early_stop_step}차) -> 가중치 {weights} (비율: {[f'{r*100:.1f}%' for r in cumulative_ratios]}) 적용")
 
 	expense = 0
 	msg_reason = ""
@@ -692,11 +692,17 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		target_amt = alloc_per_stock * target_ratio_val
 		one_shot_amt = target_amt - cur_pchs_amt
 		
-		# [CRITICAL Fix] 예산 초과 시에도 물타기 조건 충족 시 최소 1주 매수 보장
-		# 비중 계산상으로는 이미 MAX더라도, 단계(Step)상 다음 단계로 넘어가야 한다면 최소 금액만큼 지른다.
-		if theoretical_target_step > actual_current_step and one_shot_amt < MIN_PURCHASE_AMOUNT:
-			logger.info(f"⚠️ [Budget Bypass] {stk_cd}: 예산상 추가매수액({one_shot_amt:,.0f}원)이 부족하지만 물타기 단계({theoretical_target_step}차) 진입을 위해 최소금액({MIN_PURCHASE_AMOUNT:,.0f}원) 투입")
-			one_shot_amt = MIN_PURCHASE_AMOUNT
+		# [CRITICAL Fix] 예산 초과 시에도 물타기 조건 충족 시 최소 가중치(예: 2주) 매수 보장
+		# 비중 계산상으로는 이미 MAX더라도, 단계(Step)상 다음 단계로 넘어가야 한다면 
+		# 해당 단계의 가중치(weights)만큼 살 수 있는 금액을 투입한다.
+		if theoretical_target_step > actual_current_step:
+			step_weight = weights[theoretical_target_step-1] if theoretical_target_step <= len(weights) else 1
+			# 가중치만큼의 수량을 확보하기 위한 최소 금액 계산
+			min_step_amt = step_weight * current_price
+			
+			if one_shot_amt < min_step_amt:
+				logger.info(f"⚠️ [Budget Bypass] {stk_cd}: 예산상 금액({one_shot_amt:,.0f}원)이 부족하지만 {theoretical_target_step}차 단계 가중치({step_weight}주) 확보를 위해 {min_step_amt:,.0f}원 투입")
+				one_shot_amt = min_step_amt
 		
 		if one_shot_amt < 0: one_shot_amt = 0
 		
