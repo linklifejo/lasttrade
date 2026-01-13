@@ -20,7 +20,7 @@ from get_setting import get_setting
 from market_hour import MarketHour
 from database import init_db, log_asset_history, log_price_history, get_watering_step_count_sync
 
-from database_helpers import save_system_status, get_pending_web_command, mark_web_command_completed
+from database_helpers import save_system_status, get_pending_web_command, mark_web_command_completed, save_setting
 # from dashboard import run_dashboard_server # Subprocess로 실행됨
 # [Mock Server Integration] Use kiwoom_adapter for automatic Real/Mock API switching
 from kiwoom_adapter import fn_kt00004 as get_my_stocks, get_account_data, get_total_eval_amt, get_current_api_mode
@@ -214,7 +214,9 @@ class MainApp:
 		
 		# 2. 장 종료 처리 (매도 및 정지) - 15시 이후에만 동작하도록 시간 가드 추가
 		is_mock = (get_current_api_mode() == "Mock")
-		now_hour = datetime.datetime.now().hour
+		now = datetime.datetime.now()
+		now_hour = now.hour
+		now_min = now.minute
 		
 		# [Critical Fix] 아침(9시)에 장 종료 로직이 오작동하는 것을 방지하기 위해 15시(오후) 조건 추가
 		if not is_mock and now_hour >= 15 and MarketHour.is_market_end_time() and not self.today_stopped:
@@ -224,25 +226,45 @@ class MainApp:
 			await self.chat_command.report()  # 장 종료 시 report도 자동 발송
 			self.today_stopped = True  # 오늘 stop 실행 완료 표시
 
-			# [NEW] 오늘 AI 학습이 완료되었는지 확인 (DB 기반) - 15시 이후에만 학습 시도
-			self.today_learned = get_setting('ai_learned_today', '') == str(MarketHour.get_today_date())
+
+		# 3. [NEW] 일일 AI 학습 실행 (정확히 15:40분 시스템 타겟)
+		# 장 종료(15:30) 후 데이터가 모두 정산된 시점인 15:40분에 학습 시작
+		# [Debug] AI 학습 진입 조건 체크
+		if now_hour == 15 and now_min >= 40 and not self.today_learned:
+			# [Fix] Scope 문제 방지를 위해 로컬 임포트 및 존재 확인
+			from get_setting import get_setting as _get_setting
+			from market_hour import MarketHour as _MH
 			
-			if now_hour >= 15 and MarketHour.is_market_end_time() and not self.today_learned:
-				logger.info("🤖 AI 학습 시작 (백그라운드 실행)")
+			logger.info(f"🔍 [AI 학습 체크] 시간: {now_hour}:{now_min}, 오늘학습여부: {self.today_learned}")
+			# DB에서 한 번 더 확인 (중복 실행 방지)
+			is_actually_learned = _get_setting('ai_learned_today', '') == str(_MH.get_today_date())
+			
+			if not is_actually_learned:
+				self.today_learned = True # 즉시 플래그 세워 중복 진입 차단
+				logger.info("🤖 [AI 학습] 정기 학습 시각(15:40) 도달 - 백그라운드 실행 시작")
+				
 				def run_learning():
 				    try:
 				        import subprocess
 				        import sys
-				        result = subprocess.run([sys.executable, 'learn_daily.py'], cwd=os.path.dirname(os.path.abspath(__file__)), capture_output=True, text=True, timeout=600)
+				        # 타임아웃 10분, 결과 캡처
+				        result = subprocess.run([sys.executable, 'learn_daily.py'], 
+				                               cwd=os.path.dirname(os.path.abspath(__file__)), 
+				                               capture_output=True, text=True, timeout=600)
 				        if result.returncode == 0:
-				            logger.info("✅ AI 학습 완료")
-				            save_setting('ai_learned_today', str(MarketHour.get_today_date()))
+				            logger.info("✅ [AI 학습] 오늘자 학습 완료 및 가중치 업데이트 성공")
+				            from database_helpers import save_setting
+				            save_setting('ai_learned_today', str(_MH.get_today_date()))
 				        else:
-				            logger.error(f"⚠️ AI 학습 실패: {result.stderr}")
+				            logger.error(f"⚠️ [AI 학습] 실행 실패 (Code {result.returncode}): {result.stderr}")
+				            self.today_learned = False # 실패 시 다음 루프에서 재시도 가능하게 함
 				    except Exception as e:
-				        logger.error(f"⚠️ AI 학습 오류: {e}")
+				        logger.error(f"⚠️ [AI 학습] 프로세스 오류: {e}")
+				        self.today_learned = False
 				
 				asyncio.get_event_loop().run_in_executor(None, run_learning)
+			else:
+				self.today_learned = True
 		
 		# 4. [NEW] 시간 기반 자동 모드 전환 (Mock ↔ Real)
 		await self.check_auto_mode_switch()
@@ -285,6 +307,9 @@ class MainApp:
 				from kiwoom_adapter import reset_api
 				reset_api()
 				
+				# [Fix] 토큰 리셋 (재로그인 유도)
+				self.chat_command.token = None
+				
 				# [AI Smart Count] Real 모드 진입 시 예산 최적화 즉시 실행
 				self._optimize_stock_count_by_budget()
 				
@@ -319,6 +344,9 @@ class MainApp:
 				# API 어댑터 재설정
 				from kiwoom_adapter import reset_api
 				reset_api()
+				
+				# [Fix] 토큰 리셋
+				self.chat_command.token = None
 				
 				logger.info("✅ Mock 서버로 전환 완료 - 테스트 모드 복귀")
 				
@@ -1180,9 +1208,6 @@ class MainApp:
 						logger.error(f"[MainLoop] 주기적 루프 오류:\n{traceback.format_exc()}")
 						await asyncio.sleep(5) # 오류 시 대기
 						
-				# [Auto Mode Switcher] 시간 기반 Mock ↔ Real 자동 전환
-				await self.check_auto_mode_switch()
-				
 				# [AI Smart Count] Real 모드일 경우 상시 예산 최적화 (수동 전환 대응)
 				# 단, 너무 빈번한 호출을 막기 위해 10초에 한 번만 체크하거나, 
 				# _optimize 메서드 내부에서 값 변경 시에만 로그를 찍도록 되어 있으므로 안전함.
