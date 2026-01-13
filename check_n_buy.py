@@ -936,6 +936,12 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			del check_n_sell.ai_partial_sold_history[stk_cd]
 			logger.info(f"🧬 [AI Sync] {stk_cd}: 분할 매수 발생으로 AI 리스크 관리 이력 초기화")
 	except: pass
+	
+	# [Time-Cut] 매수 발생 시 보유 시각을 '현재'로 갱신 (리셋)
+	# 물타기를 했다는 것은 새로운 게임의 시작이므로 시간을 벌어줌
+	if held_since is not None:
+		held_since[stk_cd] = time.time()
+		logger.info(f"⏰ [Time Reset] {stk_cd}: 보유 시각 갱신 (매수 발생)")
 
 	# [매매 로그 DB 저장]
 	try:

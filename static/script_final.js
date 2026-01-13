@@ -1700,3 +1700,38 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Cache bust: 20251221_1926_FINAL_REVISION
+
+// [New] 시스템 로그 탭 자동 갱신 로직
+async function refreshSystemLogs() {
+    const logSection = document.getElementById('view-logs');
+    if (!logSection || !logSection.classList.contains('active')) return;
+
+    try {
+        const res = await fetch('/api/logs?t=' + Date.now());
+        const data = await res.json();
+
+        if (data.logs && Array.isArray(data.logs)) {
+            const container = document.getElementById('log-container');
+            if (container) {
+                // 기존 로그 유지 + 학습 결과를 마지막에 추가
+                const existingLogs = container.innerHTML;
+                const learningLogs = data.logs.map(line => `<div class="log-entry">${line}</div>`).join('');
+
+                // 학습 로그가 이미 추가되어 있는지 확인 (중복 방지)
+                if (!existingLogs.includes(learningLogs)) {
+                    const newHTML = existingLogs + learningLogs;
+                    const isScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
+                    container.innerHTML = newHTML;
+                    if (isScrolledToBottom) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        // Silent fail
+    }
+}
+
+// 3초마다 로그 갱신
+setInterval(refreshSystemLogs, 3000);

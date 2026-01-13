@@ -54,11 +54,12 @@ class MainApp:
 		self.total_api_fails = 0   # [Health Check] 총 API 실패 횟수
 		self.last_autocancel_time = 0 # [Throttle] AutoCancel 실행 간격 조절
 		self.manual_stop = False      # [New] 사용자 수동 정지 여부 추적 (자동 재시작 방지)
-		self.last_mock_learn_time = 0 # [Mock Learning] 마지막으로 Mock 학습을 수행한 시간(timestamp) 
+		self.last_mock_learn_time = time.time() - 50 # [Mock Learning] 첫 학습을 10초 후 실행하기 위해 50초 전으로 설정
 
 		
 		# [Persistent Held Time] - DB 기반
 		self.load_held_times()
+		self.held_since.clear() # [Force Reset] 봇 시작 시 보유 시간 강제 초기화 (시간 오류 수정용)
 		
 		# [Time-Cut Fix] rt_search에 held_since 참조 전달 (매수 즉시 타이머 등록 가능)
 		self.chat_command.rt_search.held_since_ref = self.held_since
@@ -1076,6 +1077,11 @@ class MainApp:
 		# 초기 모드 저장
 		self.last_api_mode = get_current_api_mode()
 		
+		# 시스템 시작 메시지
+		start_time = datetime.datetime.now().strftime('%H:%M:%S')
+		logger.info(f"🚀 LASTTRADE 시스템 시작 [{start_time}] - 모드: {self.last_api_mode}")
+		logger.info(f"🔍 [Debug] Mock Learning 초기화: 모드={self.last_api_mode}, last_mock_learn_time={self.last_mock_learn_time}, 현재시각={time.time()}")
+		
 		try:
 			while self.keep_running:
 				# [Heartbeat] 생존 신고
@@ -1120,8 +1126,24 @@ class MainApp:
 				if message:
 					await self.chat_command.process_command(message)
 				
+				# [Mock Mode Learning] 30분마다 자동 학습 (사용자 요청)
+				# Debug: 현재 모드 확인
+				if current_api_mode.upper() == "MOCK":
+					time_diff = time.time() - self.last_mock_learn_time
+					if time_diff > 1800:  # 30분 = 1800초
+						logger.info("🧠 [Mock Learning] 30분이 경과하여 AI 자율 학습을 시작합니다...")
+						try:
+							import subprocess
+							import sys
+							subprocess.Popen([sys.executable, "learn_daily.py"])
+							self.last_mock_learn_time = time.time()
+							logger.info("🧠 [Mock Learning] 학습 프로세스(learn_daily.py)가 백그라운드에서 시작되었습니다.")
+						except Exception as e:
+							logger.error(f"학습 프로세스 실행 실패: {e}")
+				
 				# 장 시작/종료 시간 확인
 				await self.check_market_timing()
+
 				
 				# [Watchdog] 실시간 검색 엔진 연결 상태 감시 및 복구
 				# 장 시간이고, 자동 시작 상태인데 연결이 끊겨있거나 데이터가 안 온다면 재시작

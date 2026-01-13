@@ -464,6 +464,72 @@ async def clear_sell_log():
         return {"success": False, "error": str(e)}
 
 
+@app.get("/api/logs")
+async def get_system_logs():
+    """시스템 로그 조회 (최근 학습 결과 2줄)"""
+    try:
+        today = datetime.now().strftime('%Y%m%d')
+        bot_log_path = os.path.join(BASE_DIR, f"logs/bot_{today}.log")
+        learn_log_path = os.path.join(BASE_DIR, f"logs/learn_daily_{today}.log")
+        
+        all_lines = []
+        
+        # bot 로그 읽기
+        if os.path.exists(bot_log_path):
+            with open(bot_log_path, 'r', encoding='utf-8') as f:
+                all_lines.extend(f.readlines())
+        
+        # learn_daily 로그 읽기
+        if os.path.exists(learn_log_path):
+            with open(learn_log_path, 'r', encoding='utf-8') as f:
+                all_lines.extend(f.readlines())
+        
+        # 학습 완료 메시지 찾기
+        completion_keywords = ['AI 학습 완료', '학습 데이터 부족', '학습은 스킵']
+        completion_lines = [
+            line.strip() for line in all_lines 
+            if any(keyword in line for keyword in completion_keywords)
+        ]
+        
+        if completion_lines:
+            completion_lines.sort()
+            latest = completion_lines[-1]
+            # 타임스탬프 제거하고 메시지만 추출
+            if ' - ' in latest:
+                parts = latest.split(' - ')
+                if len(parts) >= 3:
+                    message = ' - '.join(parts[2:])
+                else:
+                    message = latest
+            else:
+                message = latest
+            
+            # 메시지를 2줄로 분리 (제목 + 상세정보)
+            if ' - ' in message and '거래:' in message:
+                parts = message.split(' - ', 1)
+                title = parts[0]
+                details = parts[1] if len(parts) > 1 else ""
+                return {"logs": [title, details]}
+            else:
+                return {"logs": [message]}
+        else:
+            return {"logs": ["[대기 중] 학습 결과를 기다리는 중..."]}
+        
+    except Exception as e:
+        logger.error(f"로그 조회 실패: {e}")
+        return {"logs": [f"[Error] 로그 조회 실패: {str(e)}"]}
+
+
+
+
+
+
+
+
+
+
+
+
 # ============ WebSocket ============
 
 @app.websocket("/ws")

@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 from logger import logger
 from database_helpers import add_web_command
+from tel_send import tel_send
 
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trading.db')
 
@@ -34,6 +35,14 @@ def learn_from_today_data():
         """, (today,))
         trades = cursor.fetchall()
         logger.info(f"  📊 당일 거래: {len(trades)}건")
+        
+        # 데이터 부족 시 스킵 (텔레그램 알림)
+        if len(trades) < 5:
+            msg = f"🧠 [AI Learning] 학습 데이터 부족 ({len(trades)}/5건). 금일 학습은 스킵합니다."
+            logger.info(msg)
+            tel_send(msg)
+            conn.close()
+            return True
         
         # 2. 당일 시그널 데이터 수집
         cursor.execute("""
@@ -73,12 +82,17 @@ def learn_from_today_data():
         # 학습 완료 시각
         learn_time = datetime.now().strftime('%H:%M:%S')
         
-        # 대시보드 알림 (상세 정보 포함)
-        add_web_command('notify', {
-            'message': f'🤖 AI 학습 완료 [{learn_time}] - 거래: {len(trades)}건, 시그널: {len(signals)}건, 승률: {learning_results.get("win_rate_weight",0)*100:.1f}%'
-        })
+        # 대시보드 알림 및 텔레그램 알림 (상세 정보 포함)
+        msg_complete = f'🤖 AI 학습 완료 [{learn_time}]\n- 거래: {len(trades)}건\n- 시그널: {len(signals)}건\n- 승률: {learning_results.get("win_rate_weight",0)*100:.1f}%'
+        add_web_command('notify', {'message': msg_complete.replace('\n', ', ')})
+        tel_send(msg_complete)
         
-        logger.info("✅ AI 학습 완료")
+        logger.info(msg_complete.replace('\n', ' '))  # 상세 정보를 로그에도 기록
+        
+        # [Fix] 텔레그램 비동기 전송 완료 대기 (프로세스 종료 방지)
+        import time
+        time.sleep(2)
+        
         return True
         
     except Exception as e:
