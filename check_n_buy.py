@@ -575,6 +575,22 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 
 		expense = one_shot_amt
 		msg_reason = f"[{math_weight:.2f}x] 신규매수(1단계 {target_ratio_1st*100:.0f}%)"
+		
+		# [AI RSI 필터] 신규 매수 시 (달리는 말에 올라타기: 신고가 40일선 전략 최적화)
+		# RSI 55 ~ 80 사이의 "강한 힘"이 있는 구간에서만 진입
+		try:
+			from analyze_tools import get_rsi_for_timeframe
+			rsi_1m = get_rsi_for_timeframe(stk_cd, '1m')
+			if rsi_1m is not None:
+				if rsi_1m < 55:
+					logger.info(f"[매수 스킵] 신규 진입 시 모멘텀 부족 (RSI {rsi_1m:.0f} < 55) -> 55 이상일 때만 진입")
+					return False
+				if rsi_1m > 80:
+					logger.info(f"[매수 스킵] 신규 진입 시 과열 구간 (RSI {rsi_1m:.0f} > 80) -> 꼭지 위험 회피")
+					return False
+		except Exception as e:
+			pass
+			
 		logger.info(f"[{msg_reason}] {stk_cd}: 매수 진행 (목표: {one_shot_amt:,.0f}원, 전체 할당(가중): {alloc_per_stock:,.0f}원)")
 
 	else:
@@ -798,6 +814,23 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			should_buy = True
 			tag = "물타기" if pl_rt < 0 else "불타기"
 			msg_prefix = f"{tag}(목표단계:{target_step_by_amt+1})"
+            
+			# [AI RSI 필터] 추가 매수 시 힘(Trend) 확인
+			try:
+				from analyze_tools import get_rsi_for_timeframe
+				rsi_1m = get_rsi_for_timeframe(stk_cd, '1m')
+				if rsi_1m is not None:
+					is_plus = (pl_rt >= 0)
+					if is_plus: # 불타기 (수익 중) -> [사용자 요청] 불타기 금지 (물타기 전용)
+						logger.info(f"[매수 스킵] 사용자 요청에 의해 불타기(수익 중 추매) 비활성화")
+						should_buy = False
+					else: # 물타기 (손실 중)
+						# 하락 추세(50 미만)에서는 절대 물타기 금지 (눌림목에서만 허용)
+						if rsi_1m < 50:
+							logger.info(f"[매수 스킵] 물타기 구간이나 하락 추세 지속 (RSI {rsi_1m:.0f} < 50) -> 죽은 고양이에 물타지 않음")
+							should_buy = False
+			except Exception as e:
+				logger.error(f"RSI 체크 실패(Pass): {e}")
 		else:
 			# 매수 조건 미달 시 관망 로그 (이미 위에서 판독 로그가 찍혔으므로 필요시만 추가)
 			pass

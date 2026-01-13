@@ -193,15 +193,31 @@ def evaluate_risk_strength(rsi_1m, profit_rate, current_step):
         if profit_rate <= sl_rate * 1.2: # 손절가보다 20% 더 빠짐
             return 'FULL_SELL', f'AI판단: RSI 지지선 붕괴({rsi_1m:.0f}) 및 과도 하락. 전량 매도'
             
-    # 2. 조기 손절 단계(MAX)에서의 비중 조절
+    # 2. 전 단계(Step 1~)에서의 선제적 리스크 관리 (조기 분할 매도)
+    if current_step >= 1: 
+        # [Robust Update] 손절가(-10%) 도달 전이라도 -70% 지점(-7%)에서 RSI가 약하면 선제적 비중 축소
+        warning_rate = sl_rate * 0.7
+        if profit_rate <= warning_rate and rsi_1m < 45:
+             if profit_rate <= sl_rate:
+                 # 이미 손절가 터치
+                 if current_step >= split_buy_cnt - 1: # MAX 단계면 RSI 약세 시 전량 손절
+                     if rsi_1m < 35:
+                        return 'FULL_SELL', f'AI판단: MAX단계 손절가 초과({profit_rate}%) 및 반등 불가. 전량 매도'
+                 
+                 return 'PARTIAL_SELL', f'AI판단: 손절가({sl_rate}%) 터치. {current_step}차 단계 리스크 관리 50% 축소'
+             else:
+                 # 손절가 도달 전(-7%) 선제적 대응
+                 return 'PARTIAL_SELL', f'AI판단: {current_step}차 누적손실 심화({profit_rate}%) 및 모멘텀 약화(RSI {rsi_1m:.0f}). 선제적 50% 축소'
+                 
+    # 3. 조기 손절 단계(MAX)에서의 추가 방어 (RSI 무시하고 강력 대응)
     if current_step >= split_buy_cnt - 1: # 마지막 단계 근접
-        if profit_rate <= sl_rate:
-            if rsi_1m < 35:
-                # RSI가 낮은데 반등 기미가 없으면 전량 매도
-                return 'FULL_SELL', f'AI판단: MAX단계 손절가 도달 및 반등 신호 없음(RSI {rsi_1m:.0f})'
-            else:
-                # RSI가 어느정도 버티면(35 이상) 절반만 매도하여 반등 기회 모색
-                return 'PARTIAL_SELL', f'AI판단: 손절가 도달했으나 RSI({rsi_1m:.0f}) 버팀 시현. 50% 비중 축소'
+         # [Hard Fix] 설정값(sl_rate) 의존성 제거하고 -3% 도달 시 무조건 리스크 관리 (강제)
+         warning_rate = -3.0 
+         if profit_rate <= warning_rate:
+             return 'PARTIAL_SELL', f'AI판단: MAX단계 위험 수위({profit_rate}%) 도달. RSI 무관하게 선제적 50% 축소'
+             
+         if profit_rate <= sl_rate:
+             return 'PARTIAL_SELL', f'AI판단: MAX단계 손절가({sl_rate}%) 도달. 최후의 보루 50% 축소'
 
     # 3. 추세 이탈 감지
     if rsi_1m < 30 and profit_rate < -2.0:

@@ -59,10 +59,28 @@ class MainApp:
 		
 		# [Persistent Held Time] - DB 기반
 		self.load_held_times()
-		self.held_since.clear() # [Force Reset] 봇 시작 시 보유 시간 강제 초기화 (시간 오류 수정용)
+		
+		# [Fix] Mock 모드 시간 오류 보정 (200분 이상 된 건 과거 찌꺼기 데이터이므로 리셋)
+		try:
+			from kiwoom_adapter import get_current_api_mode
+			if get_current_api_mode().upper() == 'MOCK':
+				now = time.time()
+				for code, t in list(self.held_since.items()):
+					if (now - t) > 12000: # 200분(12000초) 이상
+						self.held_since[code] = now
+						logger.info(f"[Time Fix] {code}: 200분 이상 경과된 과거 데이터 감지 -> 현재 시간으로 리셋")
+		except: pass
 		
 		# [Time-Cut Fix] rt_search에 held_since 참조 전달 (매수 즉시 타이머 등록 가능)
 		self.chat_command.rt_search.held_since_ref = self.held_since
+		
+		# [User Request] 분할 매수 4차 및 물타기 전용 강제 설정
+		try:
+			from database_helpers import save_setting
+			save_setting('split_buy_cnt', 4)
+			save_setting('single_stock_strategy', 'WATER')
+			logger.info("[Settings] 분할 매수 4회 & 물타기(WATER) 모드로 강제 설정 완료")
+		except: pass
 		
 		# [Math] response_manager 전달
 		self.chat_command.rt_search.response_manager = response_manager

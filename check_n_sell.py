@@ -198,9 +198,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			logger.info(f"[CheckSell] {stock_code} ({stock_name}): {elapsed_str}PL={pl_rt}%, Step={cur_step}차, Qty={qty}주, Weight={filled_ratio*100:.1f}%")
 			
 			# [Safety] 재시작 직후 안전장치 (Smart Warm-up)
-			# 수익률이 -20%보다 좋으면(-10% 등) 60초간 매도 유예 (물타기 기회 부여)
-			# 단, 이미 -20% 이하로 폭락 중이면 즉시 매도 허용
-			if (time.time() - MODULE_LOAD_TIME < 60) and (pl_rt > -20.0):
+			# 수익률이 -5%보다 좋으면(-1%, -3% 등) 60초간 매도 유예 (시장 상황 파악 및 오매도 방지)
+			# 단, 이미 -5% 이하로 폭락 중인 종목(위험군)은 유예 없이 즉시 매도 체크 진행
+			if (time.time() - MODULE_LOAD_TIME < 60) and (pl_rt > -5.0):
 				continue
 
 			# [Time-Cut 설정]
@@ -425,7 +425,11 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				
 				# 정리
 				clear_stock_status_sync(stock_code)
-				try: check_n_buy.reset_accumulation(stock_code)
+				try: 
+					check_n_buy.reset_accumulation(stock_code)
+					# [Fix] 매도 시 보유 시간 기록 삭제 (재매수 시 0분부터 시작)
+					from database_helpers import delete_held_time
+					delete_held_time(stock_code)
 				except: pass
 				
 				# 매도 완료 상태 해제 (지연)
@@ -455,8 +459,13 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				sold_stocks.append(stock_code)
 				sell_reasons[stock_code] = sell_reason
 				
-				# 재매수 쿨다운
-				check_n_buy.last_sold_times[stock_code] = time.time()
+				# 재매수 쿨다운 (전량 매도일 때만 적용하여, 분할 매도 후 AI가 다시 사는 것 허용)
+				is_partial_sell = "축소" in sell_reason or "분할" in sell_reason or "PARTIAL" in sell_reason
+				
+				if not is_partial_sell:
+					check_n_buy.last_sold_times[stock_code] = time.time()
+				else:
+					logger.info(f"⚖️ [AI Trading] {stock_code}: 분할 매도이므로 재매수 쿨다운 미적용 (즉시 재진입 가능)")
 
 				# [Cleanup] 장중 중복 학습 트리거 제거 (장 마감 후 bot.py에서 1회만 수행 권장)
 				pass
