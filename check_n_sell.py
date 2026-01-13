@@ -382,13 +382,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				# 재매수 쿨다운
 				check_n_buy.last_sold_times[stock_code] = time.time()
 
-				# 학습 트리거
-				try:
-					import subprocess, sys
-					python_executable = sys.executable
-					script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'learn_daily.py')
-					subprocess.Popen([python_executable, script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-				except: pass
+				# [Cleanup] 장중 중복 학습 트리거 제거 (장 마감 후 bot.py에서 1회만 수행 권장)
+				pass
 
 		return True, sold_stocks, holdings_codes, sell_reasons
 

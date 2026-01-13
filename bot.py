@@ -4,6 +4,10 @@ import datetime
 import os
 import json
 import time
+import sys
+import threading
+import subprocess
+from typing import List, Dict, Optional
 from config import telegram_token
 from chat_command import ChatCommand
 from single_instance import SingleInstance
@@ -168,7 +172,8 @@ class MainApp:
 			try:
 				result = subprocess.run([sys.executable, 'optimize_settings.py'], cwd=os.path.dirname(os.path.abspath(__file__)), capture_output=True, text=True, timeout=30)
 				if result.stdout: logger.info(f"[AutoTune] {result.stdout.strip()}")
-			except Exception as e: logger.error(f"[AutoTune] 실행 실패: {e}")
+			except Exception as e: 
+				logger.error(f"[AutoTune] 실행 실패: {e}")
 		
 		# 1. 자동 시작 처리
 		# Mock 모드이거나 장중이면 자동 시작
@@ -207,20 +212,22 @@ class MainApp:
 				logger.info(f"자동 시작 대기 중 - 장 시작 시 자동으로 연결됩니다.")
 				self.market_open_notified = True # 메시지 중복 방지용
 		
-		# 2. 장 종료 처리 (매도 및 정지)
-		# [Fix] Mock(가상 서버) 모드일 때는 24시간 동작하므로 장 종료 자동 정지 스킵
+		# 2. 장 종료 처리 (매도 및 정지) - 15시 이후에만 동작하도록 시간 가드 추가
 		is_mock = (get_current_api_mode() == "Mock")
-		if not is_mock and MarketHour.is_market_end_time() and not self.today_stopped:
+		now_hour = datetime.datetime.now().hour
+		
+		# [Critical Fix] 아침(9시)에 장 종료 로직이 오작동하는 것을 방지하기 위해 15시(오후) 조건 추가
+		if not is_mock and now_hour >= 15 and MarketHour.is_market_end_time() and not self.today_stopped:
 			logger.info(f"장 종료 시간({MarketHour.MARKET_END_HOUR:02d}:{MarketHour.MARKET_END_MINUTE:02d})입니다. 자동으로 stop 명령을 실행합니다.")
 			await self.chat_command.stop(False)  # auto_start를 false로 설정하지 않음
 			logger.info("자동으로 계좌평가 보고서를 발송합니다.")
 			await self.chat_command.report()  # 장 종료 시 report도 자동 발송
 			self.today_stopped = True  # 오늘 stop 실행 완료 표시
 
-			# [NEW] 오늘 AI 학습이 완료되었는지 확인 (DB 기반)
+			# [NEW] 오늘 AI 학습이 완료되었는지 확인 (DB 기반) - 15시 이후에만 학습 시도
 			self.today_learned = get_setting('ai_learned_today', '') == str(MarketHour.get_today_date())
 			
-			if MarketHour.is_market_end_time() and not self.today_learned:
+			if now_hour >= 15 and MarketHour.is_market_end_time() and not self.today_learned:
 				logger.info("🤖 AI 학습 시작 (백그라운드 실행)")
 				def run_learning():
 				    try:
@@ -576,16 +583,21 @@ class MainApp:
 		target_cnt = float(get_setting('target_stock_count', 1)) 
 		if target_cnt < 1: target_cnt = 1
 		
-		# [Sync] 1:1:2:4:8 가중치 기반 단계 계산
+		# [Sync] 1:1:2:2:4 수열 기반 단계 계산 (Trading Core와 동기화)
 		s_cnt = int(get_setting('split_buy_cnt', 5))
-		st_mode = get_setting('single_stock_strategy', 'WATER').upper()
-		
+		early_stop_step = int(get_setting('early_stop_step', s_cnt - 1))
+		if early_stop_step <= 0: early_stop_step = s_cnt
+
 		weights = []
 		for i in range(s_cnt):
-			if i == 0: weights.append(1)
-			else: weights.append(2**(i - 1))
-		total_weight = sum(weights) # Renamed from 'tw' to 'total_weight' for consistency with original code structure
-		
+			# [수정] 1:1:2:2:4 수열 적용
+			weight = 2**(i // 2)
+			weights.append(weight)
+			
+		# [Critical Sync] 조기 손절 단계까지만 분모로 사용하여 100% 비중 도달 시점 동기화
+		total_weight = sum(weights[:early_stop_step])
+		if total_weight <= 0: total_weight = sum(weights)
+
 		cumulative_ratios = []
 		curr_s = 0
 		for w in weights:
@@ -773,7 +785,6 @@ class MainApp:
 					strategy_rate_val = float(get_setting('single_stock_rate', 1.5))
 					s_cnt = int(float(get_setting('split_buy_cnt', 5))) # 분할 횟수
 					
-					f_step = 0
 					# [Step Calc] DB 기록 기반 단계 판독 (사용자 요청: 매수 명령 횟수 = 단계)
 					cur_st_mode = "REAL"
 					try:
@@ -781,19 +792,31 @@ class MainApp:
 						elif str(get_setting('is_paper_trading', False)).lower() in ['1', 'true', 'on']: cur_st_mode = "PAPER"
 					except: pass
 					
-					computed_step = get_watering_step_count_sync(code, cur_st_mode)
+					db_step = get_watering_step_count_sync(code, cur_st_mode)
+					
+					# [UI Logic] 비중 기반 판독 보강
+					f_ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
+					
+					# 1. DB 기록이 있으면 우선 신뢰
+					computed_step = db_step
+					
+					# 2. 비중이 특정 단계를 명확히 넘었을 경우 (예: 1단계 비중 초과 시 2단계)
+					# cumulative_ratios[0]은 1단계의 목표 비중임 (예: 25%)
+					# 현재 비중이 이 값을 넘으면 실질적으로 2단계 매집이 시작된 것으로 간주
+					if len(cumulative_ratios) > 0:
+						if f_ratio > cumulative_ratios[0] * 0.95: # 5% 여유폭
+							if computed_step < 2: computed_step = 2
+						
+						# 추가 단계 체크 (수열 기반)
+						for i in range(1, len(cumulative_ratios)):
+							if f_ratio > cumulative_ratios[i] * 0.95:
+								if computed_step < i + 2: computed_step = i + 2
 
 					# [절대 규칙] 1주면 무조건 1차 (비중 오차 방지)
 					if qty <= 1:
 						computed_step = 1
 					elif computed_step == 0:
-						# DB 기록이 없는 경우에만 비중(Ratio) 기반으로 판독 (Backward Compatibility)
-						f_ratio = pur_amt / alloc_per_stock if alloc_per_stock > 0 else 0
-						if f_ratio < 0.08: computed_step = 1
-						elif f_ratio < 0.18: computed_step = 2
-						elif f_ratio < 0.35: computed_step = 3
-						elif f_ratio < 0.70: computed_step = 4
-						else: computed_step = 5
+						computed_step = 1
 						
 					# [Robust Fix] 수량이 적은데 비중만 높은 경우(저가주 등) 강제 하향 조정
 					if qty == 2 and computed_step > 2: computed_step = 2 

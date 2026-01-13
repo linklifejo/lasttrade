@@ -1,16 +1,27 @@
-import requests
-import json
+from kiwoom_adapter import get_token, get_account_data, get_balance
+import asyncio
 
-try:
-    resp = requests.get('http://localhost:8080/api/status')
-    data = resp.json()
-    summary = data.get('summary', {})
-    holdings = data.get('holdings', [])
+async def check_real():
+    token = get_token()
+    if not token:
+        print("❌ Failed to get token")
+        return
     
-    print(f"API Mode: {summary.get('api_mode')}")
-    print(f"Total Holdings: {len(holdings)}")
-    for h in holdings:
-        print(f" - {h.get('stk_nm')} ({h.get('stk_cd')})")
-        
-except Exception as e:
-    print(f"Error: {e}")
+    # 1. 예수금 확인
+    bal = get_balance(token=token)
+    print(f"=== REAL 계좌 잔고 ===")
+    print(f"예수금: {bal[2]:,}원")
+    print(f"총평가금: {bal[1]:,}원")
+    
+    # 2. 보유 종목 확인
+    stocks, summary = get_account_data(token=token)
+    print(f"\n=== REAL 보유 종목 ({len(stocks)}개) ===")
+    for s in stocks:
+        name = s.get('stk_nm', 'Unknown')
+        code = s.get('stk_cd', 'Unknown')
+        qty = s.get('rmnd_qty', 0)
+        pchs_avg = s.get('pchs_avg_pric', 0)
+        print(f"[{code}] {name}: {qty}주 (평단 {pchs_avg}원)")
+
+if __name__ == "__main__":
+    asyncio.run(check_real())
