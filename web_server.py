@@ -9,6 +9,7 @@ import asyncio
 import time
 from datetime import datetime
 from pathlib import Path
+from voice_generator import speak
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse
@@ -278,6 +279,19 @@ async def update_settings(request: Request):
         
         new_settings = await request.json()
         logger.info(f"📥 설정 저장 요청 받음: {len(new_settings)}개 필드")
+        
+        # 음성 보고 메시지 구성
+        voice_msg = ""
+        if 'take_profit_rate' in new_settings:
+            voice_msg += f"익절가를 {new_settings['take_profit_rate']}%로, "
+        if 'stop_loss_rate' in new_settings:
+            voice_msg += f"손절가를 {new_settings['stop_loss_rate']}%로, "
+        if 'trading_mode' in new_settings:
+            mode_name = "실전" if new_settings['trading_mode'] == 'REAL' else "모의"
+            voice_msg += f"매매 모드를 {mode_name} 투자로, "
+        
+        if voice_msg:
+            speak(f"시스템 설정을 변경합니다. {voice_msg}수정하였습니다.")
         
         # [DEBUG] 상세 로깅
         import pprint

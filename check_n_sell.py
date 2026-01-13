@@ -7,9 +7,11 @@ from tel_send import tel_send
 from get_setting import get_setting as cached_setting
 from logger import logger
 from database import log_trade_sync, update_high_price_sync, get_high_price_sync, clear_stock_status_sync, get_watering_step_count_sync
-
+from math_analyzer import evaluate_exit_strength, evaluate_risk_strength
 from utils import normalize_stock_code
 import check_n_buy
+from voice_generator import speak
+from analyze_tools import calculate_rsi, get_rsi_for_timeframe
 
 # [Safety] 모듈 로드 시간 기록 (재시작 직후 매도 방지용)
 MODULE_LOAD_TIME = time.time()
@@ -19,7 +21,13 @@ get_my_stocks = fn_kt00004
 sell_stock = fn_kt10001
 get_balance = fn_kt00001
 
+# [AI 리스크 관리] 분할 매도 상태를 전역적으로 관리 (루프 간 유지)
+# {code: timestamp} - 마지막 분할 매도 시간 기록
+ai_partial_sold_history = {}
+
 def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, outstanding_orders=None, realtime_prices=None):
+	global ai_partial_sold_history
+	partially_sold_codes = set() # 한 루프 내 중복 방지용 로컬 세트
 
 	# [설정 로드]
 	try: TP_RATE = float(cached_setting('take_profit_rate', 10.0))
@@ -223,6 +231,7 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					should_sell = True
 					sell_reason = f"상한가({step_info})"
 					logger.info(f"🚀 [LASTTRADE 상한가] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도 (Priority 0)")
+					speak(f"축하합니다. {stock_name} 종목이 상한가에 도달하여 전량 매도합니다.")
 
 			# [Early Stop Logic] 사용자 설정값(Early Stop Step) 적용
 			# 기본값: 설정 없으면 '분할횟수-1' (자동)
@@ -263,20 +272,80 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						sell_reason = f"TrailingStop({step_info})"
 						logger.info(f"🛡️ [LASTTRADE TS] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (현재수익률: {pl_rt:.2f}%)")
 
-			# 2. [조기 손절 / MAX 손절]
+			# 2. [조기 손절 / MAX 손절 / AI 리스크 관리]
 			if not should_sell and single_strategy == "WATER":
-				# (1) MAX 단계 도달 시 손절 (-1% 등 설정값)
-				if is_actually_max and pl_rt <= SL_RATE:
-					should_sell = True
-					sell_reason = f"조기손절({step_info}/비중{int(filled_ratio*100)}%)"
-					logger.warning(f"✂️ [MAX 손절] {stock_name}: {step_info} 도달 및 손절가({SL_RATE}%) 돌파")
+				# (1) AI 리스크 판단 (조기 손절 포함)
+				rsi_1m = get_rsi_for_timeframe(stock_code, '1m') if rsi_1m is None else rsi_1m
 				
-				# (2) 전역 손절 (-10% 등)
+				if rsi_1m is not None:
+					risk_action, risk_reason = evaluate_risk_strength(rsi_1m, pl_rt, cur_step)
+					
+					if risk_action == 'FULL_SELL':
+						should_sell = True
+						sell_reason = risk_reason
+						logger.warning(f"✂️ [AI FULL SELL] {stock_name}: {risk_reason}")
+					# [AI 리스크 매도 제어] 
+					# 1. 한 루프(chk_n_sell 루프) 내 중복 매도 방지: stock_code not in partially_sold_codes
+					# 2. 최근 분할 매도 이력이 있는 경우 5분간 추가 매도 유보 (Cascade 방지): ai_partial_sold_history 체크
+					last_ai_sell = ai_partial_sold_history.get(stock_code, 0)
+					is_cooldown = (time.time() - last_ai_sell < 300) # 5분 쿨다운
+					
+					if risk_action == 'PARTIAL_SELL' and stock_code not in partially_sold_codes and not is_cooldown and qty >= 2:
+						sell_qty = qty // 2
+						if sell_qty > 0:
+							logger.info(f"⚖️ [AI 리스크 관리] {stock_name}: {risk_reason} -> {sell_qty}주(50%) 리스크 조절 매도")
+							final_code = stock_code.replace('A', '')
+							res_code, res_msg = sell_stock(final_code, sell_qty, token=token)
+							
+							if str(res_code) in ['0', 'SUCCESS']:
+								partially_sold_codes.add(stock_code)
+								ai_partial_sold_history[stock_code] = time.time() # 전역 히스토리에 기록
+								tel_send(f"⚖️ [AI 리스크 관리] {stock_name}: {risk_reason} ({sell_qty}주 비중축소)")
+								speak(f"리스크 관리 차원에서 {stock_name} 종목의 비중을 축소합니다.")
+								qty -= sell_qty
+								stock['rmnd_qty'] = qty
+								try:
+									from database_trading_log import log_sell_to_db
+									log_sell_to_db(stock_code, stock_name, sell_qty, cur_prc_val, pl_rt, f"AI리스크({risk_reason})", mode_key)
+								except: pass
+							else:
+								logger.error(f"❌ [AI 리스크 매도] 실패: {res_msg}")
+
+				# (2) 전역 손절 (-10% 등) - AI 판단과 별개로 최후의 보루
 				GLOBAL_SL_VAL = float(cached_setting('global_loss_rate', -10.0))
 				if not should_sell and pl_rt <= GLOBAL_SL_VAL:
 					should_sell = True
 					sell_reason = f"전역손절({step_info}/{pl_rt}%)"
 					logger.warning(f"🚨 [전역 손절] {stock_name}: {pl_rt}% <= {GLOBAL_SL_VAL}%")
+					speak(f"긴급 상황 발생. {stock_name} 종목이 전역 손절 기준에 도달하여 긴급 매도합니다.")
+
+			# 3. [AI 분할 매도] (New)
+			if not should_sell and stock_code not in partially_sold_codes:
+				rsi_1m = get_rsi_for_timeframe(stock_code, '1m')
+				if rsi_1m is not None:
+					action, reason = evaluate_exit_strength(rsi_1m, pl_rt)
+					if action == 'PARTIAL_SELL' and qty >= 2:
+						# 절반 매도 실행
+						sell_qty = qty // 2
+						if sell_qty > 0:
+							logger.info(f"⚖️ [AI판단 분할매도] {stock_name}: {reason} -> {sell_qty}주(50%) 부분 익절 진행")
+							final_code = stock_code.replace('A', '')
+							res_code, res_msg = sell_stock(final_code, sell_qty, token=token)
+							
+							if str(res_code) in ['0', 'SUCCESS']:
+								partially_sold_codes.add(stock_code)
+								tel_send(f"⚖️ [AI판단] {stock_name}: {reason} ({sell_qty}주 수익실현)")
+								speak(f"인공지능 판단으로 {stock_name} 종목의 수익을 분할 실현합니다.")
+								# 부분 매도 후에는 남은 수량으로 계속 감시 (루프 종료 안함)
+								qty -= sell_qty
+								stock['rmnd_qty'] = qty # 업데이트
+								# DB 기록 (분할 매도 기록)
+								try:
+									from database_trading_log import log_sell_to_db
+									log_sell_to_db(stock_code, stock_name, sell_qty, cur_prc_val, pl_rt, f"AI판단({reason})", mode_key)
+								except: pass
+							else:
+								logger.error(f"❌ [AI 분할 매도] 실패: {res_msg}")
 
 			# 4. [일반 익절]
 			if not should_sell:
@@ -365,7 +434,14 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					time.sleep(5)
 					if stock_code in config.stocks_being_sold:
 						config.stocks_being_sold.remove(stock_code)
-						logger.info(f"[매도 완료] {stock_name}: 매도 상태 해제")
+					if stock_code in partially_sold_codes:
+						partially_sold_codes.discard(stock_code)
+					
+					# [AI] 전량 매도 완료 시 리스크 관리 이력도 완전 초기화
+					if stock_code in ai_partial_sold_history:
+						del ai_partial_sold_history[stock_code]
+						
+					logger.info(f"[매도 완료] {stock_name}: 매도 상태 및 AI 리스크 기록 해제")
 				threading.Thread(target=remove_from_being_sold, daemon=True).start()
 
 				# 텔레그램 전송

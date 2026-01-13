@@ -592,6 +592,7 @@ class ChatCommand:
 			• status - 매수 금지 종목 상태 확인
 			• reset - 매수 금지 목록 초기화
 			• sellall (또는 sa) - 보유 전 종목 일괄 매도
+			• rollback - AI 자율 수정 내용 되돌리기 (긴급용)
 			
 			 모든 설정은 즉시 반영됩니다. 자세한 키 목록은 factor 명령어로 확인하세요."""
 			
@@ -1114,6 +1115,23 @@ class ChatCommand:
 			return await self.factor()
 		elif command == 'analyze' or command == '분석':
 			return await self.analyze()
+		elif command == 'rollback' or command == '/rollback':
+			return await self.rollback()
 		else:
 			tel_send(f"❓ 알 수 없는 명령어입니다: {text}")
+			return False
+
+	async def rollback(self):
+		"""최근의 AI 자율 수정을 되돌립니다."""
+		try:
+			from logic_evolver import LogicEvolver
+			evolver = LogicEvolver()
+			if evolver.rollback():
+				return True
+			else:
+				tel_send("⚠️ 롤백할 이력이 없거나 실패했습니다.")
+				return False
+		except Exception as e:
+			logger.error(f"롤백 명령어 실행 중 오류: {e}")
+			tel_send(f"❌ 롤백 중 오류 발생: {e}")
 			return False

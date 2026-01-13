@@ -28,6 +28,8 @@ from kiwoom_adapter import fn_kt00001 as get_balance
 from check_n_buy import chk_n_buy, reset_accumulation_global
 from candle_manager import candle_manager
 from response_manager import response_manager
+from voice_generator import speak
+from analyze_tools import get_rsi_for_timeframe
 
 class MainApp:
 	def __init__(self):
@@ -52,6 +54,8 @@ class MainApp:
 		self.total_api_fails = 0   # [Health Check] 총 API 실패 횟수
 		self.last_autocancel_time = 0 # [Throttle] AutoCancel 실행 간격 조절
 		self.manual_stop = False      # [New] 사용자 수동 정지 여부 추적 (자동 재시작 방지)
+		self.last_mock_learn_time = 0 # [Mock Learning] 마지막으로 Mock 학습을 수행한 시간(timestamp) 
+
 		
 		# [Persistent Held Time] - DB 기반
 		self.load_held_times()
@@ -139,9 +143,17 @@ class MainApp:
 	
 
 	async def check_market_timing(self):
-		"""장 시작/종료 시간을 확인하고 자동 실행합니다."""
+		"""장 시작/종료 시간 및 기타 주기적 이벤트 체크"""
+		# 0. 휴장일(주말/공휴일) 체크 -> 엔진은 돌리되 매매 로직만 스킵
+		if not MarketHour.is_trading_day():
+			# Mock 모드면 휴장일이라도 거래 허용 (테스트용)
+			if not get_setting('use_mock_server', True):
+				if int(time.time()) % 3600 < 5: # 1시간에 한 번만 출력
+					logger.info("💤 오늘은 휴장일입니다. 시스템은 생존 보고(Heartbeat) 중입니다.")
+				return
+
 		auto_start = get_setting('auto_start', False)
-		today = datetime.datetime.now().date()
+		today = MarketHour.get_today_date()
 		
 		# 새로운 날이 되면 플래그 리셋
 		if self.last_check_date != today:
@@ -247,17 +259,25 @@ class MainApp:
 				    try:
 				        import subprocess
 				        import sys
+				        import re
 				        # 타임아웃 10분, 결과 캡처
 				        result = subprocess.run([sys.executable, 'learn_daily.py'], 
 				                               cwd=os.path.dirname(os.path.abspath(__file__)), 
 				                               capture_output=True, text=True, timeout=600)
+				        
 				        if result.returncode == 0:
-				            logger.info("✅ [AI 학습] 오늘자 학습 완료 및 가중치 업데이트 성공")
+				            # 로그에서 건수 추출 (예: "당일 거래: 61건", "당일 시그널: 31455건")
+				            trades = re.search(r'당일 거래: (\d+)건', result.stdout)
+				            signals = re.search(r'당일 시그널: (\d+)건', result.stdout)
+				            t_cnt = trades.group(1) if trades else "?"
+				            s_cnt = signals.group(1) if signals else "?"
+				            
+				            logger.info(f"✅ [AI 정기 학습 완료] 데이터 총량 -> 거래: {t_cnt}건, 시그널: {s_cnt}건")
 				            from database_helpers import save_setting
 				            save_setting('ai_learned_today', str(_MH.get_today_date()))
 				        else:
 				            logger.error(f"⚠️ [AI 학습] 실행 실패 (Code {result.returncode}): {result.stderr}")
-				            self.today_learned = False # 실패 시 다음 루프에서 재시도 가능하게 함
+				            self.today_learned = False
 				    except Exception as e:
 				        logger.error(f"⚠️ [AI 학습] 프로세스 오류: {e}")
 				        self.today_learned = False
@@ -265,6 +285,35 @@ class MainApp:
 				asyncio.get_event_loop().run_in_executor(None, run_learning)
 			else:
 				self.today_learned = True
+		
+		# 3-1. [Mock 전용] 5분 단위 정기 학습 (사용자 요청: Mock 모드 시 5분 마다 학습)
+		if is_mock:
+			now_ts = time.time()
+			if now_ts - self.last_mock_learn_time >= 300: # 300초 = 5분
+				logger.info(f"🧪 [Mock AI 학습] 5분 주기 학습 시점 도달 - 백그라운드 실행")
+				self.last_mock_learn_time = now_ts
+				
+				def run_mock_learning():
+					try:
+						import subprocess
+						import sys
+						import re
+						result = subprocess.run([sys.executable, 'learn_daily.py'], 
+									cwd=os.path.dirname(os.path.abspath(__file__)), 
+									capture_output=True, text=True, timeout=300)
+						
+						if result.returncode == 0:
+							trades = re.search(r'당일 거래: (\d+)건', result.stdout)
+							signals = re.search(r'당일 시그널: (\d+)건', result.stdout)
+							t_cnt = trades.group(1) if trades else "?"
+							s_cnt = signals.group(1) if signals else "?"
+							logger.info(f"✅ [Mock AI 학습 완료] 분석 결과 -> 거래: {t_cnt}건, 시그널: {s_cnt}건")
+						else:
+							logger.error(f"⚠️ [Mock AI 학습] 실패: {result.stderr}")
+					except Exception as e:
+						logger.error(f"⚠️ [Mock AI 학습] 프로세스 오류: {e}")
+				
+				asyncio.get_event_loop().run_in_executor(None, run_mock_learning)
 		
 		# 4. [NEW] 시간 기반 자동 모드 전환 (Mock ↔ Real)
 		await self.check_auto_mode_switch()
@@ -973,6 +1022,9 @@ class MainApp:
 				
 				# 사용자 알림 (로그)
 				self.chat_command.send_telegram_message(f"💰 [자금 최적화] 예수금({deposit:,}원)에 맞춰 운용 종목 수를 {optimal_count}개로 자동 조정했습니다.")
+				# 시작 시점이 아닐 때만 음성 알림 (시작 시에는 가디언이 이미 보고함)
+				if self.today_started:
+					speak(f"자금 상황에 맞춰 운용 종목 수를 {optimal_count}개로 자동 보정하였습니다.")
 			else:
 				logger.info(f"✅ [예산 점검] 현재 예수금({deposit:,}원)으로 {current_target}개 종목 운용 가능함.")
 				
@@ -999,6 +1051,8 @@ class MainApp:
 		if self.chat_command.token is None:
 			logger.info("초기 토큰 발급 시도...")
 			self.chat_command.get_token()
+
+		# speak("라스트트레이드 시스템이 온라인 상태가 되었습니다. 자동 매매를 시작합니다.")
 
 		# [System] 초기화
 		reset_accumulation_global()
@@ -1040,6 +1094,9 @@ class MainApp:
 					self.chat_command.token = None
 					self.chat_command.get_token(force=True)
 					self.last_api_mode = current_api_mode
+					
+					mode_text = "실전 매매" if current_api_mode == "Real" else "모의 투자"
+					speak(f"경고. 매매 모드가 {mode_text}로 변경되었습니다. 시스템을 재배치합니다.")
 					
 					# [Fix] 자산 급락 감지 초기화 (모드 변경 시 자산 규모가 다르므로)
 					self.last_valid_total_asset = 0

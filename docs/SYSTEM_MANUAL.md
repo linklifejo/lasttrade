@@ -37,6 +37,10 @@ graph TD
         WEB(web_server.py) --> RT(rt_search.py) --> UI[Browser / index.html]
     end
 
+    subgraph Voice [🔊 Voice Support]
+        VG(voice_generator.py)
+    end
+
     DB[(trading.db)]
 
     %% 관계 정의
@@ -44,6 +48,11 @@ graph TD
     START --> WEB
     WD -.->|Heartbeat 감시| BOT
     WD -.->|Heartbeat 감시| WEB
+    
+    BOT --> VG
+    SELL --> VG
+    WEB --> VG
+    WD --> VG
     
     K -->|Direct Access| DB
     RT -.->|Read Only (Loose Coupling)| DB
@@ -71,10 +80,14 @@ graph TD
 *   **기능**: 실시간 잔고/보유종목 표시, 매매 로그 출력, 설정값 변경 UI.
 *   **특징**: 트레이딩 코어에 직접 개입하지 않고, DB와 파일을 통해 데이터를 읽어서 보여줌.
 
-### C. Watchdog (Guardian) - `watchdog.py`
-*   **역할**: 사령관.
-*   **기능**: `bot.py`와 `web_server.py`의 생존 여부를 2초마다 체크.
-*   **특징**: 프로세스가 비정상 종료되거나 멈꾸면 즉시 재시작하여 골든타임을 사수함.
+### C. AI Guardian (Watchdog) - `watchdog.py`
+*   **역할**: 사령관 및 수호자.
+*   **기능**: 
+    - `bot.py`와 `web_server.py`의 생존 여부를 실시간 체크.
+    - **지능형 에러 분석**: 엔진 종료 시 로그를 분석하여 원인을 음성으로 보고.
+    - **365 상시 관리**: 정상 종료 후에도 즉시 재기동하여 시스템 다운타임을 제로화.
+    - **새벽 유지보수**: 매일 새벽 4시 DB 최적화(VACUUM) 및 로그 정리 수행.
+*   **특징**: 음성TTS를 통해 시스템 상태를 실시간으로 브리핑함.
 
 ---
 
@@ -87,6 +100,7 @@ graph TD
 *   **`check_n_sell.py`**: **매도 판단**. 조기 손절(4차), 익절, MAX 단계 손절, 장 마감 청산.
 *   **`optimize_settings.py`**: **자금 최적화**. 예수금 부족 시 목표 종목 수를 자동으로 줄여서 분할 매수 원칙을 사수함.
 *   **`kiwoom_adapter.py`**: **통신**. 키움 실전/모의투자 및 자체 Mock 서버와의 통신을 표준화하여 연결.
+*   **`voice_generator.py`**: **음성 출력**. PowerShell TTS를 이용한 시스템 상황 브리핑 라이브러리.
 
 ### 🖥️ 웹 대시보드 (UI & Client)
 사용자가 보는 화면과 관련된 영역입니다.
@@ -99,12 +113,15 @@ graph TD
 ### 💾 데이터 및 설정 (Storage & Config)
 *   **`trading.db`**: 모든 거래 내역, 체결 기록, 자산 변동 내역이 저장되는 SQLite DB.
 *   **`database.py`**: DB 연결 및 쿼리 관리.
+*   **`logic_evolver.py`**: **[Evolver]** AI가 스스로 소스 코드를 패치하는 핵심 엔진.
+*   **`docs/AI_IMPROVEMENT_PROPOSALS.md`**: **[AI 제안서]** AI가 도출한 로직 개선안 및 자율 수정 이력 기록.
 *   **`LASTTRADE_PRINCIPLES.md`**: **[헌법]** 매매 원칙, 자금 관리 철학을 정의한 문서.
 *   **`logger.py`**: 시스템 로그 관리 (인코딩 처리 포함).
 
 ### 🚀 운영 및 관리 (Operations)
 *   **`start.py`**: **시스템 시작점**. 좀비 프로세스를 정리하고 서버와 워치독을 실행.
 *   **`stop.py`**: 시스템 안전 종료.
+*   **`AUTO_START_365.bat`**: **365일 무중단 가동**. 윈도우 시작 시 자동으로 시스템을 켜고 관리함.
 
 ---
 
@@ -121,6 +138,7 @@ graph TD
 4.  **장 마감**:
     *   보유 종목 일괄 청산 (설정에 따라).
     *   `learn_daily.py`: 하루 매매 복기 및 AI 학습 (15:40).
+    *   **Logic Evolution (Full-Auto)**: 성과 분석 결과에 따라 `logic_evolver.py`가 코드를 자동 패치.
     *   자동 종료.
 
 ---
@@ -139,6 +157,8 @@ graph TD
 | | `watchdog.py` | 프로세스 감시 및 자동 재시작 |
 | | `logger.py` | 로그 기록 (한글 처리) |
 | | `config.py` | 설정 및 비밀값 관리 |
+| | `voice_generator.py` | 상황별 음성 보고 라이브러리 |
+| | `AUTO_START_365.bat` | 시스템 시작 시 자동 실행 스크립트 |
 | **매매 코어** | `bot.py` | **메인 엔진**. 장 운영 및 스케줄링 |
 | (Brain) | `check_n_buy.py` | **매수/물타기** 로직 판단 |
 | | `check_n_sell.py` | **매도/손절/익절** 로직 판단 |

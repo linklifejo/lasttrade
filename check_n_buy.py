@@ -12,6 +12,7 @@ from database import get_price_history_sync, log_signal_snapshot_sync, get_water
 
 from technical_judge import technical_judge
 from utils import normalize_stock_code
+from candle_manager import candle_manager
 from stock_info import fn_ka10001 as stock_info
 
 # Aliases for compatibility
@@ -355,22 +356,51 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	prob_fmt = f"{win_prob*100:.1f}" if win_prob is not None else "N/A"
 	logger.info(f"📊 [LASTTRADE Math] RSI_1m: {rsi_fmt} -> 기대 승률: {prob_fmt}% (표본: {sample_count}건)")
 	
-	# 데이터가 충분할 때만 승률 필터 적용
+	# [Math Engine] 기대 승률에 따른 기본 비중 조절 (0.5배 ~ 1.5배)
 	math_weight = 1.0
 	if sample_count >= min_count and win_prob is not None:
 		if win_prob < min_prob:
 			logger.warning(f"📉 [Math Filter] {stk_cd}: 기대 승률({win_prob*100:.1f}%)이 기준({min_prob*100:.0f}%) 미달하여 매수 취소")
 			return False
 		
-		# [Math Engine] 기대 승률에 따른 비중 조절 (0.5배 ~ 1.5배)
 		# 기준 승률(min_prob) 이상일 때, 추가 승률 1%당 5% 비중 확대
 		math_weight = 1.0 + (win_prob - min_prob) * 5.0
-		math_weight = max(0.8, min(1.5, math_weight)) # 너무 급격한 축소는 방지 (최소 0.8배)
-		logger.info(f"⚖️ [Math Weight] 기대 승률 가중치 적용: {math_weight:.2f}x (승률 {win_prob*100:.1f}%)")
-	else:
-		# [Fix] 데이터가 부족한 경우(신규 세션 등) 매수를 차단하지 않고 기본 가중치로 진행 (눈을 뜨게 함)
-		logger.info(f"ℹ️ [Math Filter] 표본 수 부족({sample_count}/{min_count}) - 기본 비중(1.0x)으로 매수 진행")
-		math_weight = 1.0
+		
+	# [New] 60분봉 컨텍스트 추가 (숲의 흐름)
+	ctx_60m = {}
+	try:
+		ctx_60m = candle_manager.get_context_60m(stk_cd)
+		logger.info(f"🌳 [60m Context] Trend: {ctx_60m.get('trend_60m')}, MA_Gap: {ctx_60m.get('ma_gap_60m')}%")
+	except Exception as e:
+		logger.warning(f"⚠️ 60분봉 컨텍스트 획득 실패: {e}")
+
+	# [AI Weight Tuning] 학습된 추세별 가중치(60분봉) 반영 (사용자 요청: 비중 조절 관여)
+	try:
+		from database_helpers import get_db_connection
+		with get_db_connection() as conn:
+			cursor = conn.execute("SELECT key, value FROM learned_weights")
+			db_weights = {r['key']: r['value'] for r in cursor.fetchall()}
+			
+			avg_win = db_weights.get('win_rate_weight', 0.5)
+			trend_60 = ctx_60m.get('trend_60m', 0)
+			
+			if trend_60 == 1: # 정배열
+				specific_win = db_weights.get('bull_trend_bonus', avg_win)
+				multiplier = (specific_win / avg_win) if avg_win > 0 else 1.0
+				math_weight *= multiplier
+				logger.info(f"🌳 [AI Size] 60m 정배열 보정: {multiplier:.2f}x (승률 {specific_win*100:.1f}%)")
+			elif trend_60 == -1: # 역배열
+				specific_win = db_weights.get('bear_trend_penalty', avg_win)
+				multiplier = (specific_win / avg_win) if avg_win > 0 else 1.0
+				math_weight *= multiplier
+				logger.info(f"📉 [AI Size] 60m 역배열 보정: {multiplier:.2f}x (승률 {specific_win*100:.1f}%)")
+				
+		# 최종 가중치 범위 제한 (0.5 ~ 1.5배)
+		math_weight = max(0.5, min(1.5, math_weight))
+		logger.info(f"⚖️ [Final AI Weight] 최종 매수 비중 가중치: {math_weight:.2f}x")
+	except Exception as e:
+		logger.warning(f"⚠️ AI 비중 보정 실패: {e}")
+		math_weight = max(0.8, min(1.2, math_weight)) # 오류 시 보수적 범위 적용
 
 	# [자산 데이터 정리] 위에서 이미 계산된 balance와 net_asset 사용
 	# net_asset = 예수금(deposit_amt) + 주식평가금(stock_val)
@@ -399,6 +429,26 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		'strategy': single_strategy,
 		'capital_ratio': capital_ratio
 	}
+	
+	# [AI Awareness] 설정창의 주요 팩터들 포함 (사용자 요청: AI가 현재 설정을 항상 파악하도록 함)
+	try:
+		trading_settings = {
+			'set_tp': float(get_setting('take_profit_rate', 10.0)),
+			'set_sl': float(get_setting('stop_loss_rate', -10.0)),
+			'set_tc_min': int(get_setting('time_cut_minutes', 5)),
+			'set_tc_profit': float(get_setting('time_cut_profit', 0.5)),
+			'set_target_cnt': target_cnt,
+			'set_strategy_rate': strategy_rate,
+			'set_split_cnt': split_cnt,
+			'set_set_early_stop': int(get_setting('early_stop_step', split_cnt - 1)),
+			'set_ts_active': get_setting('use_trailing_stop', False),
+			'set_ts_goal': float(get_setting('trailing_stop_activation_rate', 1.5)),
+			'set_ts_callback': float(get_setting('trailing_stop_callback_rate', 0.5))
+		}
+		factors.update(trading_settings)
+		factors.update(ctx_60m)
+	except Exception as e:
+		logger.warning(f"⚠️ 설정 팩터 수집 실패: {e}")
 	
 	# 실시간 정보 추가 (거래량, 체결강도 등)
 	if realtime_data:
@@ -524,7 +574,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			return False
 
 		expense = one_shot_amt
-		msg_reason = f"신규 매수 (1단계 {target_ratio_1st*100:.0f}%)"
+		msg_reason = f"[{math_weight:.2f}x] 신규매수(1단계 {target_ratio_1st*100:.0f}%)"
 		logger.info(f"[{msg_reason}] {stk_cd}: 매수 진행 (목표: {one_shot_amt:,.0f}원, 전체 할당(가중): {alloc_per_stock:,.0f}원)")
 
 	else:
@@ -775,7 +825,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			if msg_reason and "차" in msg_reason: # 위에서 설정한 단계 정보 활용
 				msg_prefix = f"{msg_prefix}:{msg_reason}" 
 				
-			msg_reason = msg_prefix
+			msg_reason = f"[{math_weight:.2f}x] {msg_prefix}"
 			logger.info(f"[{msg_reason}] {stk_cd}: 추가 매수 (현재: {cur_eval:,.0f}원 -> 추가: {expense:,.0f}원)")
 		else:
 			return False
@@ -862,7 +912,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		logger.error(f"종목명 DB 조회 중 오류: {e}")
 		stock_name = stk_cd  # 조회 실패 시 코드로 대체
 
-	message = f'{stock_name} {ord_qty}주 매수 주문 전송 완료'
+	message = f'[{msg_reason}] {stock_name} {ord_qty}주 매수 주문 전송 완료'
 	logger.info(message)
 	
 	try:
@@ -876,14 +926,22 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	# [추가] 내부 누적 매수 금액 업데이트 (API 반영 지연 대응)
 	if stk_cd not in accumulated_purchase_amt:
 		accumulated_purchase_amt[stk_cd] = 0
-	accumulated_purchase_amt[stk_cd] += expense
-	logger.info(f"[데이터 업데이트] {stk_cd}: 내부 누적 매수금 업데이트 (+{expense:,.0f}원 -> 총 {accumulated_purchase_amt[stk_cd]:,.0f}원)")
+	# [데이터 업데이트] {stk_cd}: 내부 누적 매수금 업데이트 (+{expense:,.0f}원 -> 총 {accumulated_purchase_amt[stk_cd]:,.0f}원)
+	
+	# [AI] 분할 매수 수행 시, 해당 종목의 AI 리스크 관리 이력(분할 매도 기록) 초기화
+	# 매수가 이루어졌다는 것은 비중이 다시 늘어났음을 의미하므로 AI가 새로운 시점에서 다시 판별하도록 함
+	try:
+		import check_n_sell
+		if stk_cd in check_n_sell.ai_partial_sold_history:
+			del check_n_sell.ai_partial_sold_history[stk_cd]
+			logger.info(f"🧬 [AI Sync] {stk_cd}: 분할 매수 발생으로 AI 리스크 관리 이력 초기화")
+	except: pass
 
 	# [매매 로그 DB 저장]
 	try:
 		from database_trading_log import log_buy_to_db
 		mode = get_current_api_mode().upper()  # "Mock" -> "MOCK"
-		log_buy_to_db(stk_cd, stock_name, ord_qty, bid, mode)
+		log_buy_to_db(stk_cd, stock_name, ord_qty, bid, mode, msg_reason)
 	except Exception as e:
 		logger.error(f"매수 로그 DB 저장 실패: {e}")
 

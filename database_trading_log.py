@@ -17,7 +17,7 @@ def get_db_connection():
 	conn.row_factory = sqlite3.Row
 	return conn
 
-def log_buy_to_db(code, name, qty, price, mode=None):
+def log_buy_to_db(code, name, qty, price, mode=None, reason=""):
 	"""매수 로그 저장"""
 	if mode is None:
 		try:
@@ -31,16 +31,13 @@ def log_buy_to_db(code, name, qty, price, mode=None):
 	timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 	amt = qty * price
 	
-	# [Simulation Context] 현재 활성화된 시뮬레이션 정보 가져오기
+	# [Simulation Context] 현재 활성화된 시나리오 정보 조회
 	config_id = None
 	scenario_id = None
 	try:
 		with get_db_connection() as conn:
-			# 활성화된 시나리오 조회
 			s_row = conn.execute('SELECT id FROM sim_scenarios WHERE is_active = 1 LIMIT 1').fetchone()
 			if s_row: scenario_id = s_row['id']
-			
-			# 가장 최근의 시뮬레이션 설정(팩터) 조회
 			c_row = conn.execute('SELECT id FROM sim_configs ORDER BY id DESC LIMIT 1').fetchone()
 			if c_row: config_id = c_row['id']
 	except: pass
@@ -48,13 +45,12 @@ def log_buy_to_db(code, name, qty, price, mode=None):
 	try:
 		with get_db_connection() as conn:
 			conn.execute('''
-				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, avg_price, mode, memo)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			''', (timestamp, 'buy', code, name, qty, price, amt, price, mode, 
+				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, avg_price, mode, reason, memo)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			''', (timestamp, 'buy', code, name, qty, price, amt, price, mode, reason,
 				 f"SIM_CONFIG:{config_id}, SIM_SCENARIO:{scenario_id}" if config_id or scenario_id else ""))
 			conn.commit()
-			logger.info(f"✅ 매수 로그 DB 저장: {name} {qty}주 @ {price:,}원 [{mode}]" + 
-						(f" (SIM:{config_id}/{scenario_id})" if config_id or scenario_id else ""))
+			logger.info(f"✅ 매수 로그 DB 저장: {name} {qty}주 @ {price:,}원 [{mode}] - {reason}")
 	except Exception as e:
 		logger.error(f"❌ 매수 로그 DB 저장 실패 ({name} @ {mode}): {e}")
 
@@ -132,7 +128,7 @@ def get_trading_logs_from_db(mode=None, limit=10000, since_id=0, date=None):
 			# 매수 로그 조회
 			cursor = conn.execute(f'''
 				SELECT id, timestamp as time, code as stk_cd, name as stk_nm, 
-				       qty, price, amt, avg_price, mode
+				       qty, price, amt, avg_price, mode, reason
 				FROM trades 
 				{where_clause}
 				ORDER BY id DESC 
@@ -151,7 +147,8 @@ def get_trading_logs_from_db(mode=None, limit=10000, since_id=0, date=None):
 					'price': row['price'],
 					'avg_price': row['avg_price'],
 					'amt': row['amt'],
-					'mode': row['mode']
+					'mode': row['mode'],
+					'reason': row['reason'] or ''
 				})
 			
 			# 매도 로그 조회 (같은 로직 적용)

@@ -162,3 +162,8 @@ class MarketHour:
 		market_open = cls._get_market_time(cls.MARKET_START_HOUR, cls.MARKET_START_MINUTE)
 		buy_end = cls._get_market_time(15, 28) # 15:28 매수 마감 (테스트 위해 연장)
 		return market_open <= now < buy_end
+
+	@staticmethod
+	def get_today_date():
+		"""오늘 날짜를 YYYY-MM-DD 형식으로 반환합니다."""
+		return datetime.datetime.now().strftime('%Y-%m-%d')

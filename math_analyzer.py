@@ -151,5 +151,63 @@ def get_win_probability(rsi_1m, rsi_diff=None):
         
     return base_prob, total_count
 
+def evaluate_exit_strength(rsi_1m, profit_rate):
+    """
+    AI 기반 실시간 익절 강도 판독 (설정창 팩터 인지 버전)
+    반환값 (action, reason): 
+      - action: 'PARTIAL_SELL'(분할매도 권장), 'HOLD'(보유), 'FULL_SELL'(완전매도)
+    """
+    from get_setting import get_setting
+    
+    # 설정창의 익절/손절 기준 파악 (AI 인지 핵심)
+    tp_rate = float(get_setting('take_profit_rate', 2.0))
+    sl_rate = float(get_setting('stop_loss_rate', -3.0))
+    
+    # 1. 과매수 구간 진입 패턴 분석 (목표 수익률의 70% 이상 도달 시 RSI 과열 체크)
+    target_threshold = tp_rate * 0.7 # 목표의 70%
+    
+    if rsi_1m >= 75: # 매우 강력한 과매수
+        if profit_rate >= target_threshold:
+            return 'PARTIAL_SELL', f'AI판단: RSI 극과열({rsi_1m:.0f} > 75) & 목표치 70% 도달 분할익절'
+        if profit_rate >= 1.0:
+            return 'PARTIAL_SELL', f'AI판단: RSI 과열({rsi_1m:.0f}) 및 최소수익(1%) 확보 분할익절'
+            
+    if rsi_1m >= 70 and profit_rate >= tp_rate * 0.9: # 목표가 근접 & 과매수
+        return 'PARTIAL_SELL', f'AI판단: RSI 과열({rsi_1m:.0f}) & 목표가 근접(90% 도달) 분할익절'
+    
+    # 2. 손절 방어 AI (나중에 확장 가능)
+    return 'HOLD', '상승 여력 충분 (설정 범위 내)'
+
+def evaluate_risk_strength(rsi_1m, profit_rate, current_step):
+    """
+    AI 기반 실시간 리스크(손절) 강도 판독
+    조기 손절 단계에서 단순히 전량 매도하기보다 AI가 추세를 판단하여 비중을 조절합니다.
+    """
+    from get_setting import get_setting
+    
+    sl_rate = float(get_setting('stop_loss_rate', -3.0))
+    split_buy_cnt = int(get_setting('split_buy_cnt', 5))
+    
+    # 1. 치명적 위기 판단 (전역 손절 근접 또는 RSI 붕괴)
+    if rsi_1m <= 20: # 극심한 침체
+        if profit_rate <= sl_rate * 1.2: # 손절가보다 20% 더 빠짐
+            return 'FULL_SELL', f'AI판단: RSI 지지선 붕괴({rsi_1m:.0f}) 및 과도 하락. 전량 매도'
+            
+    # 2. 조기 손절 단계(MAX)에서의 비중 조절
+    if current_step >= split_buy_cnt - 1: # 마지막 단계 근접
+        if profit_rate <= sl_rate:
+            if rsi_1m < 35:
+                # RSI가 낮은데 반등 기미가 없으면 전량 매도
+                return 'FULL_SELL', f'AI판단: MAX단계 손절가 도달 및 반등 신호 없음(RSI {rsi_1m:.0f})'
+            else:
+                # RSI가 어느정도 버티면(35 이상) 절반만 매도하여 반등 기회 모색
+                return 'PARTIAL_SELL', f'AI판단: 손절가 도달했으나 RSI({rsi_1m:.0f}) 버팀 시현. 50% 비중 축소'
+
+    # 3. 추세 이탈 감지
+    if rsi_1m < 30 and profit_rate < -2.0:
+        return 'PARTIAL_SELL', f'AI판단: 단기 추세 이탈(RSI {rsi_1m:.0f}) 감지. 리스크 관리차원 50% 매도'
+
+    return 'HOLD', '리스크 감내 가능 구간'
+
 if __name__ == "__main__":
     analyze_signals()

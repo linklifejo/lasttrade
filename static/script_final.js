@@ -570,7 +570,7 @@ function renderFilteredLogs(filterType) {
                     ${typeCell}
                     <td class="text-center">${qty}주</td>
                     <td class="text-center">-</td>
-                    <td class="text-center">-</td>
+                    <td class="text-center">${log.reason || '-'}</td>
                 `;
             } else {
                 // Correctly map from trading_log.json fields
