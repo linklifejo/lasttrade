@@ -193,28 +193,26 @@ def evaluate_risk_strength(rsi_1m, profit_rate, current_step):
         if profit_rate <= sl_rate * 1.2: # 손절가보다 20% 더 빠짐
             return 'FULL_SELL', f'AI판단: RSI 지지선 붕괴({rsi_1m:.0f}) 및 과도 하락. 전량 매도'
             
-    # 2. 전 단계(Step 1~)에서의 선제적 리스크 관리 (조기 분할 매도)
+    # 2. 전 단계(Step 1~)에서의 선제적 리스크 관리 (신고가 추세 추종 전략)
+    # 사장님 지시: 단계 불문하고(1단계부터) RSI 30 붕괴 시 추세 이탈로 보고 비중 축소
     if current_step >= 1: 
-        # [Robust Update] 손절가(-10%) 도달 전이라도 -70% 지점(-7%)에서 RSI가 약하면 선제적 비중 축소
-        warning_rate = sl_rate * 0.7
-        if profit_rate <= warning_rate and rsi_1m < 45:
-             if profit_rate <= sl_rate:
-                 # 이미 손절가 터치
-                 if current_step >= split_buy_cnt - 1: # MAX 단계면 RSI 약세 시 전량 손절
-                     if rsi_1m < 35:
-                        return 'FULL_SELL', f'AI판단: MAX단계 손절가 초과({profit_rate}%) 및 반등 불가. 전량 매도'
-                 
-                 return 'PARTIAL_SELL', f'AI판단: 손절가({sl_rate}%) 터치. {current_step}차 단계 리스크 관리 50% 축소'
-             else:
-                 # 손절가 도달 전(-7%) 선제적 대응
-                 return 'PARTIAL_SELL', f'AI판단: {current_step}차 누적손실 심화({profit_rate}%) 및 모멘텀 약화(RSI {rsi_1m:.0f}). 선제적 50% 축소'
-                 
-    # 3. 조기 손절 단계(MAX)에서의 추가 방어 (RSI 무시하고 강력 대응)
+        # 신고가 종목 원칙: RSI 50 이하는 물타기 구간이지만, 30 미만은 '추세 붕괴'
+        if rsi_1m is not None and rsi_1m < 30:
+             return 'PARTIAL_SELL', f'AI판단: 신고가 추세 붕괴(RSI {rsi_1m:.0f} < 30). {current_step}단계 비중 50% 축소'
+
+    # 3. 조기 손절 단계(MAX)에서의 추가 방어 (신고가 특성 반영)
     if current_step >= split_buy_cnt - 1: # 마지막 단계 근접
-         # [Hard Fix] 설정값(sl_rate) 의존성 제거하고 -3% 도달 시 무조건 리스크 관리 (강제)
+         # -3% 도달 시 대응 (이미 RSI 30 미만은 위에서 처리됨)
+         # RSI가 30 이상인데도 -3%까지 밀렸다면?? -> 이건 힘이 빠진 것. 
+         # 신고가 종목이라도 MAX 단계에서 -3%면 위험 관리 필요
          warning_rate = -3.0 
          if profit_rate <= warning_rate:
-             return 'PARTIAL_SELL', f'AI판단: MAX단계 위험 수위({profit_rate}%) 도달. RSI 무관하게 선제적 50% 축소'
+             if rsi_1m is not None and rsi_1m >= 30:
+                 return 'PARTIAL_SELL', f'AI판단: MAX단계 위험 수위({profit_rate}%) 도달. (RSI {rsi_1m:.0f} >= 30 이지만 손실 확대로 축소)'
+             
+             # 혹시 RSI 데이터 없으면 안전하게 축소
+             if rsi_1m is None:
+                 return 'PARTIAL_SELL', f'AI판단: MAX단계 위험 수위 도달(데이터 없음). 안전상 50% 축소'
              
          if profit_rate <= sl_rate:
              return 'PARTIAL_SELL', f'AI판단: MAX단계 손절가({sl_rate}%) 도달. 최후의 보루 50% 축소'
