@@ -608,6 +608,46 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	else:
 		# [기보유 종목 처리]
 		
+		# [Safety Logic] 사장님 요청: 1. 손절 후 재진입 쿨타임(3분) & 2. RSI 45 이상 확인 (확실한 반등 시에만 물타기)
+		try:
+			from database_helpers import get_db_connection
+			import datetime
+			
+			# 1. 최근 매도 시간 확인 (3분 쿨타임)
+			# 매도 직후 급하게 다시 사는 '뇌동매매' 방지
+			with get_db_connection() as conn:
+				last_sell = conn.execute(
+					"SELECT timestamp FROM trades WHERE code = ? AND (type='SELL' OR type='sell') ORDER BY id DESC LIMIT 1",
+					(stk_cd,)
+				).fetchone()
+				
+				if last_sell:
+					last_sell_str = last_sell['timestamp'] # YYYY-MM-DD HH:MM:SS
+					# [Fix] 포맷 매칭 (초 단위 없는 경우 대비)
+					try:
+						last_sell_dt = datetime.datetime.strptime(last_sell_str, '%Y-%m-%d %H:%M:%S')
+					except:
+						last_sell_dt = datetime.datetime.now() # 에러 시 현재 시간으로 간주하여 안전하게 패스
+					
+					elapsed_seconds = (datetime.datetime.now() - last_sell_dt).total_seconds()
+					
+					# 최근 매도가 오늘 일어난 것이고, 3분(180초) 미만이면 차단
+					# (어제 판 건 상관없으므로 하루(86400초) 이내인 경우만 체크)
+					if elapsed_seconds < 86400 and elapsed_seconds < 180: 
+						logger.warning(f"[재진입 금지] {stk_cd}: 최근 매도 후 {elapsed_seconds:.0f}초 경과 (3분 쿨타임 중) -> 매수 보류")
+						return False
+
+			# 2. RSI 45 확인 (충분한 반등 힘이 있을 때만 추가 매수)
+			# 물타기라도 하락 추세(RSI < 45)에서는 하지 않고, 고개를 들 때(RSI >= 45) 한다.
+			from analyze_tools import get_rsi_for_timeframe
+			rsi_1m_rebuy = get_rsi_for_timeframe(stk_cd, '1m')
+			if rsi_1m_rebuy is not None and rsi_1m_rebuy < 45:
+				logger.info(f"[추가매수 보류] {stk_cd}: 반등 모멘텀 부족 (RSI {rsi_1m_rebuy:.0f} < 45) -> 45 이상 회복 시 진입")
+				return False
+
+		except Exception as e:
+			logger.warning(f"[Safety Check Error] 재진입 안전장치 오류(무시하고 진행): {e}")
+
 		# [원칙 적용] 몰빵/분산 관계없이 추가 매수 조건을 체크합니다.
 		# 기존의 '분산 투자 시 추가 매수 금지' 로직은 제거되었습니다.
 			
