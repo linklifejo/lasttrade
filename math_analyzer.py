@@ -194,11 +194,11 @@ def evaluate_risk_strength(rsi_1m, profit_rate, current_step):
             return 'FULL_SELL', f'AI판단: RSI 지지선 붕괴({rsi_1m:.0f}) 및 과도 하락. 전량 매도'
             
     # 2. 전 단계(Step 1~)에서의 선제적 리스크 관리 (신고가 추세 추종 전략)
-    # 사장님 지시: 단계 불문하고(1단계부터) RSI 30 붕괴 시 추세 이탈로 보고 비중 축소
+    # 사장님 지시: RSI 40까진 물타기/홀딩, 35 붕괴 시 추세 이탈로 보고 선제적 비중 축소
     if current_step >= 1: 
-        # 신고가 종목 원칙: RSI 50 이하는 물타기 구간이지만, 30 미만은 '추세 붕괴'
-        if rsi_1m is not None and rsi_1m < 30:
-             return 'PARTIAL_SELL', f'AI판단: 신고가 추세 붕괴(RSI {rsi_1m:.0f} < 30). {current_step}단계 비중 50% 축소'
+        # 신고가 종목 원칙: RSI 35 미만은 '위험 신호' (40대 반등 실패로 간주)
+        if rsi_1m is not None and rsi_1m < 35:
+             return 'PARTIAL_SELL', f'AI판단: 신고가 추세 붕괴(RSI {rsi_1m:.0f} < 35). {current_step}단계 비중 50% 축소'
 
     # 3. 조기 손절 단계(MAX)에서의 추가 방어 (신고가 특성 반영)
     if current_step >= split_buy_cnt - 1: # 마지막 단계 근접
