@@ -577,17 +577,29 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		msg_reason = f"[{math_weight:.2f}x] 신규매수(1단계 {target_ratio_1st*100:.0f}%)"
 		
 		# [AI RSI 필터] 신규 매수 시 (달리는 말에 올라타기: 신고가 40일선 전략 최적화)
-		# RSI 55 ~ 80 사이의 "강한 힘"이 있는 구간에서만 진입
+		# RSI 50(설정값) 이상인 "강한 힘"이 있는 구간에서만 진입
 		try:
 			from analyze_tools import get_rsi_for_timeframe
 			rsi_1m = get_rsi_for_timeframe(stk_cd, '1m')
+			
+			# 설정된 매수 RSI 기준값 사용 (기본 50)
+			min_rsi_buy = float(get_setting('min_rsi_for_buy', 50.0))
+			
 			if rsi_1m is not None:
-				if rsi_1m < 55:
-					logger.info(f"[매수 스킵] 신규 진입 시 모멘텀 부족 (RSI {rsi_1m:.0f} < 55) -> 55 이상일 때만 진입")
+				if rsi_1m < min_rsi_buy:
+					logger.info(f"[매수 스킵] 신규 진입 시 모멘텀 부족 (RSI {rsi_1m:.0f} < {min_rsi_buy:.0f}) -> 기준 미달")
 					return False
-				if rsi_1m > 80:
-					logger.info(f"[매수 스킵] 신규 진입 시 과열 구간 (RSI {rsi_1m:.0f} > 80) -> 꼭지 위험 회피")
-					return False
+				
+				# [New High Strategy] RSI 70 이상 과열 구간 처리 (정찰병 전략)
+				# 사장님 지시: 70 이상이면 너무 뜨거우니 비중을 절반으로 줄여서 진입
+				if rsi_1m >= 70:
+					logger.info(f"[정찰병 진입] RSI 과열({rsi_1m:.0f} >= 70) 구간 -> 상따 리스크 관리 위해 1차 매수금액 50% 축소")
+					one_shot_amt *= 0.5
+					
+					# 최소 금액 재검증
+					if one_shot_amt < MIN_PURCHASE_AMOUNT:
+						one_shot_amt = MIN_PURCHASE_AMOUNT
+
 		except Exception as e:
 			pass
 			
