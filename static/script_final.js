@@ -1707,7 +1707,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // Cache bust: 20251221_1926_FINAL_REVISION
 
 // [New] 시스템 로그 탭 자동 갱신 로직
-// [New] 시스템 로그 탭 자동 갱신 로직
 let lastSystemLogMessage = ''; // 중복 방지 저장용
 
 async function refreshSystemLogs() {
@@ -1721,18 +1720,21 @@ async function refreshSystemLogs() {
         if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
             const container = document.getElementById('log-container');
             if (container) {
-                // [User Request] 학습이 완료되었을 때 '한 번만' 추가하도록 개선
-                const currentMsg = data.logs.join(' ');
+                // [User Request] 학습 데이터 내용을 한 줄로 합치고 시간 추가
+                const fullMsg = data.logs.join(' - ');
 
-                if (lastSystemLogMessage !== currentMsg) {
-                    data.logs.forEach(line => {
-                        const entry = document.createElement('div');
-                        entry.className = 'log-entry success'; // 학습 결과는 성공색으로
-                        entry.textContent = line;
-                        container.appendChild(entry);
-                    });
+                if (lastSystemLogMessage !== fullMsg) {
+                    const entry = document.createElement('div');
+                    entry.className = 'log-entry success';
 
-                    lastSystemLogMessage = currentMsg;
+                    const now = new Date();
+                    const timeStr = now.toTimeString().split(' ')[0];
+                    // 시간 + 데이터 일체형 출력
+                    entry.textContent = `[${timeStr}] ${fullMsg}`;
+
+                    container.appendChild(entry);
+                    lastSystemLogMessage = fullMsg;
+
                     // 자동 스크롤
                     container.scrollTop = container.scrollHeight;
                 }
