@@ -631,10 +631,13 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 					
 					elapsed_seconds = (datetime.datetime.now() - last_sell_dt).total_seconds()
 					
-					# 최근 매도가 오늘 일어난 것이고, 3분(180초) 미만이면 차단
+					# 최근 매도가 오늘 일어난 것이고, 설정된 쿨타임(기본 2분/120초) 미만이면 차단
 					# (어제 판 건 상관없으므로 하루(86400초) 이내인 경우만 체크)
-					if elapsed_seconds < 86400 and elapsed_seconds < 180: 
-						logger.warning(f"[재진입 금지] {stk_cd}: 최근 매도 후 {elapsed_seconds:.0f}초 경과 (3분 쿨타임 중) -> 매수 보류")
+					# [No Hardcoding] 상수 제거 -> DB 설정값 사용 (기본값 120초)
+					cooldown_sec = int(get_setting('rebuy_cooldown_seconds', 120))
+					
+					if elapsed_seconds < 86400 and elapsed_seconds < cooldown_sec: 
+						logger.warning(f"[재진입 금지] {stk_cd}: 최근 매도 후 {elapsed_seconds:.0f}초 경과 ({cooldown_sec}초 쿨타임 중) -> 매수 보류")
 						return False
 
 			# 2. RSI 45 확인 (충분한 반등 힘이 있을 때만 추가 매수)
