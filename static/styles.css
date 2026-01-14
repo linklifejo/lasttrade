@@ -827,8 +827,9 @@ tr:hover td {
     font-size: 1.1rem;
     line-height: 1.6;
     display: flex;
-    flex-direction: column-reverse;
-    /* 최신 로그가 위로 */
+    flex-direction: column;
+    justify-content: flex-start;
+    /* 상단부터 채우고 JS에서 하단 스크롤 */
 }
 
 .log-entry {

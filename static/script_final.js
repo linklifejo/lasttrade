@@ -1228,6 +1228,8 @@ async function sendCommand(command) {
 
 function addLog(message, type = '') {
     const container = document.getElementById('log-container');
+    if (!container) return;
+
     const entry = document.createElement('div');
     entry.className = 'log-entry ' + type;
 
@@ -1235,15 +1237,18 @@ function addLog(message, type = '') {
     const timeStr = now.toTimeString().split(' ')[0];
     entry.textContent = `[${timeStr}] ${message}`;
 
-    // 로그 컨테이너에 추가 (최신순)
-    container.insertBefore(entry, container.firstChild);
+    // [User Request] 기존 로그 아래에 추가 (가장 최근 것이 맨 아래)
+    container.appendChild(entry);
 
-    // [Resumed] 알림 메시지 복원 (우측 상단 표시)
+    // 자동 스크롤 하단 고정
+    container.scrollTop = container.scrollHeight;
+
+    // Toast 알림
     showToast(message, type);
 
-    // Keep only last 100 entries
-    while (container.children.length > 100) {
-        container.removeChild(container.lastChild);
+    // 로그 개수 제한 (성능 보호)
+    while (container.children.length > 500) {
+        container.removeChild(container.firstChild);
     }
 }
 
@@ -1702,6 +1707,9 @@ document.addEventListener('DOMContentLoaded', () => {
 // Cache bust: 20251221_1926_FINAL_REVISION
 
 // [New] 시스템 로그 탭 자동 갱신 로직
+// [New] 시스템 로그 탭 자동 갱신 로직
+let lastSystemLogMessage = ''; // 중복 방지 저장용
+
 async function refreshSystemLogs() {
     const logSection = document.getElementById('view-logs');
     if (!logSection || !logSection.classList.contains('active')) return;
@@ -1710,21 +1718,23 @@ async function refreshSystemLogs() {
         const res = await fetch('/api/logs?t=' + Date.now());
         const data = await res.json();
 
-        if (data.logs && Array.isArray(data.logs)) {
+        if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
             const container = document.getElementById('log-container');
             if (container) {
-                // 기존 로그 유지 + 학습 결과를 마지막에 추가
-                const existingLogs = container.innerHTML;
-                const learningLogs = data.logs.map(line => `<div class="log-entry">${line}</div>`).join('');
+                // [User Request] 학습이 완료되었을 때 '한 번만' 추가하도록 개선
+                const currentMsg = data.logs.join(' ');
 
-                // 학습 로그가 이미 추가되어 있는지 확인 (중복 방지)
-                if (!existingLogs.includes(learningLogs)) {
-                    const newHTML = existingLogs + learningLogs;
-                    const isScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
-                    container.innerHTML = newHTML;
-                    if (isScrolledToBottom) {
-                        container.scrollTop = container.scrollHeight;
-                    }
+                if (lastSystemLogMessage !== currentMsg) {
+                    data.logs.forEach(line => {
+                        const entry = document.createElement('div');
+                        entry.className = 'log-entry success'; // 학습 결과는 성공색으로
+                        entry.textContent = line;
+                        container.appendChild(entry);
+                    });
+
+                    lastSystemLogMessage = currentMsg;
+                    // 자동 스크롤
+                    container.scrollTop = container.scrollHeight;
                 }
             }
         }
