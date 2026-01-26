@@ -136,8 +136,19 @@ async function fetchStatus() {
 }
 
 // --- 1. Dashboard UI Updates ---
+let lastDashboardDataJSON = '';
+
 function updateDashboard(data) {
     if (!data || !data.summary) return;
+
+    // [Optimization] 전체 데이터 변화 체크 (UI 깜빡임의 최종 방어선)
+    const currentJSON = JSON.stringify(data.summary);
+    if (lastDashboardDataJSON === currentJSON) {
+        // Summary가 같더라도 홀딩스는 다를 수 있으므로 홀딩스만 체크하러 이동
+        updateHoldingsTable(data.holdings || []);
+        return;
+    }
+    lastDashboardDataJSON = currentJSON;
 
     const s = data.summary;
 
@@ -199,7 +210,14 @@ function updateHoldingsTable(stocks) {
     const tbody = document.getElementById('holdings-body');
 
     // 1. 데이터 변경 여부 확인 (전체 stringify 비교)
-    const currentJSON = JSON.stringify(stocks);
+    // [Fix] 순서가 바뀌어서 와도 내용이 같으면 변경으로 치지 않도록 정렬 후비교
+    const sortedStocks = [...stocks].sort((a, b) => {
+        const nameA = a.stk_nm || a.name || '';
+        const nameB = b.stk_nm || b.name || '';
+        return nameA.localeCompare(nameB);
+    });
+    const currentJSON = JSON.stringify(sortedStocks);
+
     if (lastHoldingsJSON === currentJSON && isTableInitialized) {
         return; // 데이터가 완전히 동일하면 아무것도 하지 않음
     }
@@ -237,7 +255,7 @@ function updateHoldingsTable(stocks) {
         const pnlClass = pnl >= 0 ? 'profit-cell' : 'loss-cell';
 
         return { name, avg_prc, rate, pnl, qty, cur_prc, hold_time, water_step, rateClass, pnlClass };
-    });
+    }).sort((a, b) => a.name.localeCompare(b.name));
 
     // 4. 기존 DOM 행 관리 (Name 기준)
     const existingRows = Array.from(tbody.querySelectorAll('tr:not(.empty-msg)'));
@@ -402,12 +420,18 @@ async function loadTradingLog(forceSinceZero = false) {
             updateReportSummary(currentStats);
         }
 
-        renderFilteredLogs(activeTab);
+        // [Optimization] Only re-render if we actually received NEW data entries or forced a reload
+        // This prevents the "flickering" issue by not clearing/redrawing the DOM when nothing changed
+        const hasNewData = (data.buys && data.buys.length > 0) || (data.sells && data.sells.length > 0);
 
-        // [New] Update Dashboard Recent Activity Section
-        try {
-            updateRecentActivity(globalTradingLogs);
-        } catch (e) { console.error('Recent activity update error', e); }
+        if (hasNewData || forceSinceZero) {
+            renderFilteredLogs(activeTab);
+
+            // [New] Update Dashboard Recent Activity Section
+            try {
+                updateRecentActivity(globalTradingLogs);
+            } catch (e) { console.error('Recent activity update error', e); }
+        }
 
     } catch (e) {
         console.error('Failed to load trading log:', e);
@@ -475,7 +499,7 @@ function updateRecentActivity(data) {
 function renderFilteredLogs(filterType) {
     const tbody = document.getElementById('sell-body');
     const theadTr = document.querySelector('#history-thead tr');
-    tbody.innerHTML = '';
+    // tbody.innerHTML = ''; // [Fix] 무조건 지우고 시작 금지 (초기화 방지)
 
     // [Simplification] 백엔드 API가 이미 현재 모드에 맞는 데이터를 필터링해서 보내주므로
     // 클라이언트 측에서 중복 필터링을 수행하지 않고 그대로 사용합니다.
@@ -546,25 +570,27 @@ function renderFilteredLogs(filterType) {
     if (displayLogs.length === 0) {
         tbody.innerHTML = `<tr class="empty-row"><td colspan="6">조회된 데이터가 없습니다.</td></tr>`;
     } else {
-        displayLogs.forEach(log => {
-            const tr = document.createElement('tr');
-            const logTime = getTime(log);
-            const timePart = logTime.includes(' ') ? logTime.split(' ')[1] : logTime;
-            const logName = log.name || log.stk_nm || '-';
-            const uid = getUID(log);
+        // [Fix] HTML 문자열로 먼저 조립 후 한 번에 업데이트 (Diff Check 포함)
+        let newHtml = '';
 
-            // 금액 계산 (단가 * 수량)
-            const price = parseFloat(log.price || log.avg_price || 0);
-            const qty = parseInt(log.qty || 0);
-            const totalAmt = Math.floor(price * qty).toLocaleString() + '원';
+        if (displayLogs.length === 0) {
+            newHtml = `<tr class="empty-row"><td colspan="6">조회된 데이터가 없습니다.</td></tr>`;
+        } else {
+            displayLogs.forEach(log => {
+                const logTime = getTime(log);
+                const timePart = logTime.includes(' ') ? logTime.split(' ')[1] : logTime;
+                const logName = log.name || log.stk_nm || '-';
+                const uid = getUID(log);
+                const price = parseFloat(log.price || log.avg_price || 0);
+                const qty = parseInt(log.qty || 0);
+                const totalAmt = Math.floor(price * qty).toLocaleString() + '원';
 
-            if (log.type === 'Buy') {
-                // 매수 탭이면 금액 표시, 전체 탭이면 '매수' 텍스트 표시
-                const typeCell = (filterType === 'buy')
-                    ? `<td class="text-center" style="color:#10b981; font-weight:bold;">${totalAmt}</td>`
-                    : `<td style="color:#10b981; font-weight:bold;" class="text-center">매수</td>`;
-
-                tr.innerHTML = `
+                let rowContent = '';
+                if (log.type === 'Buy') {
+                    const typeCell = (filterType === 'buy')
+                        ? `<td class="text-center" style="color:#10b981; font-weight:bold;">${totalAmt}</td>`
+                        : `<td style="color:#10b981; font-weight:bold;" class="text-center">매수</td>`;
+                    rowContent = `
                     <td class="text-center">${timePart}</td>
                     <td class="stress text-center">${logName}</td>
                     ${typeCell}
@@ -572,27 +598,20 @@ function renderFilteredLogs(filterType) {
                     <td class="text-center">-</td>
                     <td class="text-center">${log.reason || '-'}</td>
                 `;
-            } else {
-                // Correctly map from trading_log.json fields
-                const rate = parseFloat(log.yield || log.profit_rate || 0);
-                const rateClass = rate > 0 ? 'profit-cell' : 'loss-cell';
-                const reason = log.reason || '-';
-                const isTC = reason.includes('TimeCut') || reason.includes('시간제한');
+                } else {
+                    const rate = parseFloat(log.yield || log.profit_rate || 0);
+                    const rateClass = rate > 0 ? 'profit-cell' : 'loss-cell';
+                    const reason = log.reason || '-';
+                    const isTC = reason.includes('TimeCut') || reason.includes('시간제한');
+                    let lastCell = `<td class="text-center">${reason}</td>`;
+                    if (filterType === 'timecut') {
+                        lastCell = `<td class="text-center"><button class="btn-delete-small" onclick="deleteSingleTimeCut('${uid}')">삭제</button></td>`;
+                    }
+                    const typeCell = (filterType === 'sell' || filterType === 'timecut')
+                        ? `<td class="text-center" style="${isTC ? 'color:orange;' : 'color:#ef4444;'} font-weight:bold;">${totalAmt}</td>`
+                        : `<td style="${isTC ? 'color:orange;' : 'color:#ef4444;'} font-weight:bold;" class="text-center">${isTC ? '타임컷' : '매도'}</td>`;
 
-                let lastCell = `<td class="text-center">${reason}</td>`;
-                // Add delete button in timecut tab
-                if (filterType === 'timecut') {
-                    lastCell = `<td class="text-center">
-                        <button class="btn-delete-small" onclick="deleteSingleTimeCut('${uid}')">삭제</button>
-                    </td>`;
-                }
-
-                // 매도/타임컷 탭이면 금액 표시, 전체 탭이면 '매도'/'타임컷' 텍스트 표시
-                const typeCell = (filterType === 'sell' || filterType === 'timecut')
-                    ? `<td class="text-center" style="${isTC ? 'color:orange;' : 'color:#ef4444;'} font-weight:bold;">${totalAmt}</td>`
-                    : `<td style="${isTC ? 'color:orange;' : 'color:#ef4444;'} font-weight:bold;" class="text-center">${isTC ? '타임컷' : '매도'}</td>`;
-
-                tr.innerHTML = `
+                    rowContent = `
                     <td class="text-center">${timePart}</td>
                     <td class="stress text-center">${logName}</td>
                     ${typeCell}
@@ -600,16 +619,20 @@ function renderFilteredLogs(filterType) {
                     <td class="${rateClass} text-center">${rate.toFixed(2)}%</td>
                     ${lastCell}
                 `;
-            }
-            tbody.appendChild(tr);
-        });
-    }
+                }
+                newHtml += `<tr>${rowContent}</tr>`;
+            });
+        }
 
-    if (currentStats) {
-        updateReportSummary(currentStats);
+        if (tbody.innerHTML !== newHtml) {
+            tbody.innerHTML = newHtml;
+        }
+
+        if (currentStats) {
+            updateReportSummary(currentStats);
+        }
     }
 }
-
 
 // Global helper for deletion
 window.deleteSingleTimeCut = function (uid) {
@@ -955,8 +978,11 @@ async function saveSettings() {
             // 시각적 피드백 강화
             if (btnGeneral) btnGeneral.innerHTML = '✅ 저장 완료!';
             if (btnCreds) btnCreds.innerHTML = '✅ 저장 완료!';
-            showToast('✅ 설정이 성공적으로 저장되었습니다! (DB 동기화 완료)', 'success');
-            addLog(`시스템 설정이 업데이트되었습니다.`, 'success');
+            showToast('✅ 설정 저장 완료! 봇을 자동 실행합니다...', 'success');
+            addLog(`시스템 설정 업데이트 및 자동 실행 중...`, 'success');
+
+            // [User Request] 저장 시 봇 자동 실행 (재실행)
+            await sendCommand('start');
         } else {
             throw new Error(result.error || '저장 실패');
         }
@@ -1401,9 +1427,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateTime();
     setInterval(updateTime, 1000);
 
-    // [Fix] 갱신 주기 단축 (0.5s) - 반응성 강화
-    setInterval(fetchStatus, 500);
-    setInterval(loadTradingLog, 500);
+    // [Fix] 갱신 주기 1초로 재설정 (Diff Check는 내부적으로 수행)
+    setInterval(fetchStatus, 1000);
+    setInterval(loadTradingLog, 1000);
 
     // -- Settings Management (단일 버튼 통합) --
     document.getElementById('save-settings')?.addEventListener('click', saveSettings);
@@ -1745,5 +1771,5 @@ async function refreshSystemLogs() {
     }
 }
 
-// 3초마다 로그 갱신
-setInterval(refreshSystemLogs, 3000);
+// 3초마다 로그 갱신 (잠시 중단)
+// setInterval(refreshSystemLogs, 3000);

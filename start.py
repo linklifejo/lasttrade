@@ -35,7 +35,7 @@ def run_system():
     
     server_path = os.path.join(script_dir, WEB_SERVER_SCRIPT)
     
-    print(f"[+] Starting Mock Server...", end="", flush=True)
+    print(f"[+] Starting Web Dashboard...", end="", flush=True)
     server_proc = subprocess.Popen(
         [python_exe, server_path], 
         cwd=script_dir,

@@ -321,8 +321,9 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	if use_rsi:
 		logger.info("📡 [LASTTRADE RSI] 필터링 활성화 상태 (대원칙에 따라 사용 시 주의)")
 		# [Danta] 1분봉 및 3분봉 RSI 동시 체크
-		rsi_1m = get_rsi_for_timeframe(stk_cd, '1m')
-		rsi_3m = get_rsi_for_timeframe(stk_cd, '3m')
+		from analyze_tools import get_rsi_for_timeframe as get_rsi
+		rsi_1m = get_rsi(stk_cd, '1m')
+		rsi_3m = get_rsi(stk_cd, '3m')
 		
 		rsi_val_str = str(get_setting('rsi_limit', 70)).strip()
 		if not rsi_val_str: rsi_val_str = '70'

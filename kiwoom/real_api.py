@@ -52,7 +52,7 @@ class RealKiwoomAPI(KiwoomAPI):
                 logger.warning(f'Token request failed - Response: {response.text[:200]}')
                 # Mock 모드가 아닐 때만 경고
                 from database_helpers import get_setting
-                use_mock = get_setting('use_mock_server', True)
+                use_mock = get_setting('use_mock_server', False)
                 if not use_mock:
                     logger.warning(f"⚠️ 토큰 발급 실패 (HTTP {response.status_code}) - API 키/Secret 또는 네트워크를 확인하세요")
                 return None
@@ -66,7 +66,7 @@ class RealKiwoomAPI(KiwoomAPI):
         except Exception as e:
             # Mock 모드에서는 토큰 오류 표시 안 함
             from database_helpers import get_setting
-            use_mock = get_setting('use_mock_server', True)
+            use_mock = get_setting('use_mock_server', False)
             if not use_mock:
                 logger.warning(f"⚠️ 토큰 발급 중 오류: {e}")
             return None

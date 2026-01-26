@@ -20,7 +20,7 @@ from get_setting import get_setting
 from market_hour import MarketHour
 from database import init_db, log_asset_history, log_price_history, get_watering_step_count_sync
 
-from database_helpers import save_system_status, get_pending_web_command, mark_web_command_completed, save_setting
+from database_helpers import save_system_status, get_pending_web_command, mark_web_command_completed, save_setting, get_bot_running
 # from dashboard import run_dashboard_server # Subprocess로 실행됨
 # [Mock Server Integration] Use kiwoom_adapter for automatic Real/Mock API switching
 from kiwoom_adapter import fn_kt00004 as get_my_stocks, get_account_data, get_total_eval_amt, get_current_api_mode
@@ -166,7 +166,7 @@ class MainApp:
 		# 0. 휴장일(주말/공휴일) 체크 -> 엔진은 돌리되 매매 로직만 스킵
 		if not MarketHour.is_trading_day():
 			# Mock 모드면 휴장일이라도 거래 허용 (테스트용)
-			if not get_setting('use_mock_server', True):
+			if not get_setting('use_mock_server', False):
 				if int(time.time()) % 3600 < 5: # 1시간에 한 번만 출력
 					logger.info("💤 오늘은 휴장일입니다. 시스템은 생존 보고(Heartbeat) 중입니다.")
 				return
@@ -212,10 +212,10 @@ class MainApp:
 		# 따라서 Mock 모드일 때는 manual_stop 여부와 상관없이 초기 1회는 무조건 시작 시도
 		
 		# [Fix] 인자값 무시하고 DB 설정값 강제 로드 (확실한 자동시작)
-		auto_start = get_setting('auto_start', False)
+		auto_start = get_setting('auto_start', True)
 		
 		# [Debug] 콘솔 출력으로 원인 파악
-		is_mock = get_setting('use_mock_server', True)
+		is_mock = get_setting('use_mock_server', False)
 		target_condition = (is_mock or MarketHour.is_market_open_time())
 		
 		logger.info(f"🤖 [AutoStart Debug] auto_start={auto_start}, is_mock={is_mock}, target={target_condition}, manual_stop={self.manual_stop}")
@@ -341,7 +341,7 @@ class MainApp:
 		"""시간 기반 Mock ↔ Real 자동 전환"""
 		try:
 			# 설정 확인
-			auto_switch_enabled = get_setting('auto_mode_switch_enabled', True)  # 기본값: 활성화
+			auto_switch_enabled = get_setting('auto_mode_switch_enabled', False)  # 기본값: 비활성화 (수동 전환 원칙)
 			if not auto_switch_enabled:
 				return
 			
@@ -455,9 +455,16 @@ class MainApp:
 						await self.chat_command.rt_search.stop()
 						await asyncio.sleep(1)
 					
-					await self.chat_command.rt_search.start(self.chat_command.token)
-					self.manual_stop = False # 수동 일시정지 해제
-					
+					# 새로운 토큰으로 시작 시도
+					success = await self.chat_command.rt_search.start(self.chat_command.token)
+					if success:
+						self.today_started = True # 시작 성공 마킹
+						self.manual_stop = False # 수동 일시정지 해제
+						set_bot_running(True)    # DB 상태 동기화
+						logger.info(f"✅ [System] 새로운 모드({get_current_api_mode()})로 자동 시작 성공")
+					else:
+						logger.error(f"❌ [System] 새로운 모드({get_current_api_mode()})로 시작 실패")
+
 					# 누적 매수 금액 리셋
 					from check_n_buy import reset_accumulation_global
 					reset_accumulation_global()
@@ -533,7 +540,7 @@ class MainApp:
 			self.total_api_fails += 1
 			
 			# Mock 모드에서는 Health Check 경고 표시 안 함
-			use_mock = get_setting('use_mock_server', True)
+			use_mock = get_setting('use_mock_server', False)
 			if not use_mock:
 				logger.error(f"[Health Check] API 통신 실패 ({self.api_fail_count}회 연속): {e}")
 			
@@ -1308,7 +1315,7 @@ class MainApp:
 				# [AI Smart Count] Real 모드일 경우 상시 예산 최적화 (수동 전환 대응)
 				# 단, 너무 빈번한 호출을 막기 위해 10초에 한 번만 체크하거나, 
 				# _optimize 메서드 내부에서 값 변경 시에만 로그를 찍도록 되어 있으므로 안전함.
-				if not get_setting('use_mock_server', True):
+				if not get_setting('use_mock_server', False):
 					self._optimize_stock_count_by_budget()
 
 				# 1분 통계 기록

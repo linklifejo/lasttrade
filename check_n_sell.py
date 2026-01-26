@@ -142,6 +142,7 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			stock_code = normalize_stock_code(stock['stk_cd'])
 			stock_name = stock['stk_nm']
 			holdings_codes.append(stock_code) 
+			rsi_1m = None # Initialize to avoid UnboundLocalError
 
 			pl_rt = float(stock['pl_rt']) if stock['pl_rt'] else 0.0
 			
@@ -275,7 +276,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			# 2. [조기 손절 / MAX 손절 / AI 리스크 관리]
 			if not should_sell and single_strategy == "WATER":
 				# (1) AI 리스크 판단 (조기 손절 포함)
-				rsi_1m = get_rsi_for_timeframe(stock_code, '1m') if rsi_1m is None else rsi_1m
+				from analyze_tools import get_rsi_for_timeframe as get_rsi
+				rsi_1m = get_rsi(stock_code, '1m') if rsi_1m is None else rsi_1m
 				
 				if rsi_1m is not None:
 					risk_action, risk_reason = evaluate_risk_strength(rsi_1m, pl_rt, cur_step)
@@ -321,7 +323,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 
 			# 3. [AI 분할 매도] (New)
 			if not should_sell and stock_code not in partially_sold_codes:
-				rsi_1m = get_rsi_for_timeframe(stock_code, '1m')
+				from analyze_tools import get_rsi_for_timeframe as get_rsi
+				rsi_1m = get_rsi(stock_code, '1m') if rsi_1m is None else rsi_1m
 				if rsi_1m is not None:
 					action, reason = evaluate_exit_strength(rsi_1m, pl_rt)
 					if action == 'PARTIAL_SELL' and qty >= 2:

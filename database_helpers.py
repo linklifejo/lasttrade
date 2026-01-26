@@ -548,6 +548,8 @@ def get_current_status(mode='MOCK'):
 	except Exception as e:
 		logger.error(f"상태 조회 실패: {e}")
 		return {
+			'error': True,
+			'message': str(e),
 			'summary': {
 				'total_asset': 0,
 				'total_buy': 0,

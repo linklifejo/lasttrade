@@ -151,8 +151,8 @@ async def get_status():
         from database_helpers import get_current_status, get_setting
         
         # 1. DB에서 현재 설정된 모드 확인
-        use_mock = get_setting('use_mock_server', True)
-        is_paper = get_setting('is_paper_trading', True)
+        use_mock = get_setting('use_mock_server', False)
+        is_paper = get_setting('is_paper_trading', False)
         current_mode = "MOCK" if use_mock else "REAL"
         
         # 2. PAPER 모드일 경우 보정
@@ -176,6 +176,8 @@ async def get_status():
         traceback.print_exc()
         
         return {
+            'error': True,
+            'message': str(e),
             'summary': {
                 'total_asset': 0,
                 'total_buy': 0,
@@ -197,8 +199,8 @@ async def get_sell_log():
         from database_trading_log import get_trading_logs_from_db
         
         from database_helpers import get_setting
-        use_mock = get_setting('use_mock_server', True)
-        is_paper = get_setting('is_paper_trading', True)
+        use_mock = get_setting('use_mock_server', False)
+        is_paper = get_setting('is_paper_trading', False)
         
         if use_mock:
             mode = "MOCK"
@@ -231,8 +233,8 @@ async def get_trading_log(since_id: int = 0):
         from database_helpers import get_setting
         
         # 1. 현재 설정된 모드 확인 (설정 연동)
-        use_mock = get_setting('use_mock_server', True)
-        is_paper = get_setting('is_paper_trading', True)
+        use_mock = get_setting('use_mock_server', False)
+        is_paper = get_setting('is_paper_trading', False)
         
         if use_mock:
             mode = "MOCK"
@@ -317,12 +319,13 @@ async def update_settings(request: Request):
                 await loop.run_in_executor(None, kiwoom_adapter.reset_api)
                 logger.info(f"🔄 API 팩토리 초기화 완료 (모드/키 변경)")
                 
-                # [UX] Real 모드로 변경 시 자동 시작 활성화 (사용자 의도 반영)
-                # use_mock_server가 False로 오거나, trading_mode가 REAL로 오면
-                if (new_settings.get('use_mock_server') is False) or (new_settings.get('trading_mode') == 'REAL'):
-                    new_settings['auto_start'] = True
-                    await loop.run_in_executor(None, save_all_settings, {'auto_start': True})
-                    logger.info("🚀 [UX] Real 모드 변경 감지 -> Auto Start 활성화")
+                # [UX] 모드 변경 또는 키 변경 시 즉시 자동 시작 활성화 (사용자 의도 반영)
+                from database_helpers import set_bot_running, save_setting
+                
+                # 강제로 자동 시작 및 봇 실행 중으로 설정
+                await loop.run_in_executor(None, save_setting, 'auto_start', True)
+                await loop.run_in_executor(None, set_bot_running, True)
+                logger.info("🚀 [UX] 모드/키 변경 감지 -> Auto Start 및 Bot Running 활성화")
 
                 # 2. 봇 프로세스에 재시작(Re-init) 명령 전달
                 from database_helpers import add_web_command
@@ -406,7 +409,7 @@ async def clear_buy_log():
                     if settings.get("use_mock_server", True):
                         mode = "MOCK"
                     else:
-                        is_paper = settings.get("is_paper_trading", True)
+                        is_paper = settings.get("is_paper_trading", False)
                         if is_paper: mode = "PAPER"
                         else: mode = "REAL"
             except:
@@ -536,6 +539,7 @@ async def get_system_logs():
 async def websocket_endpoint(websocket: WebSocket):
     """실시간 상태 업데이트 WebSocket"""
     await manager.connect(websocket)
+    websocket.last_sent_data = None
     try:
         while True:
             # [Fix] 대시보드 반응성 강화를 위해 갱신 주기를 0.3초로 단축 (사용자 체감 슬립 제거)
@@ -543,8 +547,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 from database_helpers import get_current_status, get_setting
                 
                 # 1. 모드 확인
-                use_mock = get_setting('use_mock_server', True)
-                is_paper = get_setting('is_paper_trading', True)
+                use_mock = get_setting('use_mock_server', False)
+                is_paper = get_setting('is_paper_trading', False)
                 mode = "MOCK" if use_mock else ("PAPER" if is_paper else "REAL")
                 
                 # 2. 통합된 상태 조회 함수 사용 (DB값 대신 실시간 값)
@@ -552,10 +556,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 data = await loop.run_in_executor(None, get_current_status, mode)
                 
                 if data:
-                    await websocket.send_json(data)
+                    # [Optimization] Only send if data changed (Server-side diff)
+                    current_json = json.dumps(data, sort_keys=True)
+                    if current_json != websocket.last_sent_data:
+                        await websocket.send_json(data)
+                        websocket.last_sent_data = current_json
             except Exception as e:
                 pass 
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(1.0) # Poll every 1s
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

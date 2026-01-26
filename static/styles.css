@@ -439,6 +439,8 @@ body {
     gap: 12px;
     transition: transform 0.3s ease, box-shadow 0.3s ease;
     padding: 16px;
+    min-height: 100px;
+    /* Keep cards aligned with larger Buy value */
 }
 
 .summary-card:hover {

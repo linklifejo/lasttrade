@@ -1,0 +1,41 @@
+{
+  "acnt_nm": "조복연",
+  "brch_nm": "국민은행9",
+  "entr": "000001285984",
+  "d2_entra": "-00005216866",
+  "tot_est_amt": "000006525260",
+  "aset_evlt_amt": "000001323434",
+  "tot_pur_amt": "000006558400",
+  "prsm_dpst_aset_amt": "000001309374",
+  "tot_grnt_sella": "000001160000",
+  "tdy_lspft_amt": "000000000000",
+  "invt_bsamt": "000000000000",
+  "lspft_amt": "000000000000",
+  "tdy_lspft": "000000000000",
+  "lspft2": "000000000000",
+  "lspft": "000000000000",
+  "tdy_lspft_rt": "0.00",
+  "lspft_ratio": "0.00",
+  "lspft_rt": "0.00",
+  "stk_acnt_evlt_prst": [
+    {
+      "stk_cd": "A005930",
+      "stk_nm": "삼성전자",
+      "rmnd_qty": "000000000043",
+      "avg_prc": "000000152520",
+      "cur_prc": "000000152100",
+      "evlt_amt": "000006525260",
+      "pl_amt": "-00000033140",
+      "pl_rt": "-0.5053",
+      "loan_dt": "",
+      "pur_amt": "000006558400",
+      "setl_remn": "000000000000",
+      "pred_buyq": "000000000001",
+      "pred_sellq": "000000000001",
+      "tdy_buyq": "000000000043",
+      "tdy_sellq": "000000000000"
+    }
+  ],
+  "return_code": 0,
+  "return_msg": "조회가 완료되었습니다."
+}

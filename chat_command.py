@@ -26,7 +26,7 @@ class ChatCommand:
 		self.script_dir = os.path.dirname(os.path.abspath(__file__))
 		# [Mode Check] 파일 분리 (Mock/Real)
 		self.mode_suffix = "_mock"
-		if not get_setting('use_mock_server', True):
+		if not get_setting('use_mock_server', False):
 			self.mode_suffix = "_real"
 		
 		self.daily_asset_path = os.path.join(self.script_dir, f'daily_asset{self.mode_suffix}.json') # 일일 자산 저장 경로
@@ -41,7 +41,7 @@ class ChatCommand:
 		try:
 			import time
 			# [NEW] 모드별 토큰 DB 필드 분리
-			trading_mode = get_setting('trading_mode', 'MOCK').upper()
+			trading_mode = get_setting('trading_mode', 'REAL').upper()
 			token_key = f'api_token_{trading_mode}'
 			token_time_key = f'api_token_time_{trading_mode}'
 			
@@ -104,7 +104,7 @@ class ChatCommand:
 				return token
 			else:
 				# Mock 모드에서는 토큰 오류 표시 안 함
-				use_mock = get_setting('use_mock_server', True)
+				use_mock = get_setting('use_mock_server', False)
 				if not use_mock:
 					logger.warning("⚠️ 토큰 발급 실패 - API 키/Secret 또는 5회 제한을 확인하세요")
 				return None
@@ -497,9 +497,8 @@ class ChatCommand:
 	async def condition(self, number=None):
 		"""condition 명령어를 처리합니다 - 조건식 목록 조회 또는 search_seq 설정"""
 		try:
-			# 먼저 stop 실행
-			tel_send("🔄 condition 명령어 실행을 위해 서비스를 중지합니다...")
-			await self.stop(set_auto_start_false=False)  # auto_start는 그대로 유지
+			# tel_send("🔄 condition 명령어 실행을 위해 서비스를 중지합니다...")
+			# await self.stop(set_auto_start_false=False)  # auto_start는 그대로 유지
 			
 			# 숫자가 제공된 경우 search_seq 설정
 			if number is not None:
@@ -650,10 +649,10 @@ class ChatCommand:
 			# [New] 최근 매도 이력 (5개) - DB에서 조회
 			try:
 				# 봇 모드 결정 (MOCK / PAPER / REAL)
-				use_mock = get_setting('use_mock_server', True)
+				use_mock = get_setting('use_mock_server', False)
 				if use_mock: mode_str = "MOCK"
 				else:
-					is_paper = get_setting('is_paper_trading', True)
+					is_paper = get_setting('is_paper_trading', False)
 					mode_str = "PAPER" if is_paper else "REAL"
 				
 				db_logs = get_trading_logs_from_db(mode=mode_str, limit=5)
@@ -763,10 +762,40 @@ class ChatCommand:
 
 	async def _init_daily_asset(self):
 		"""일일 시초 자산을 초기화하거나 로드합니다."""
-		# [OVERRIDE] 5억으로 강제 고정
-		self.initial_asset = 500000000
-		logger.info(f"금일 시초 자산 고정: {self.initial_asset:,.0f}원 (5억)")
-		return
+		# [Mod] 5억 고정 대신 설정값 또는 현재가 로드 (Mock 모드 자동종료 방지)
+		from get_setting import get_setting
+		from kiwoom_adapter import get_active_api
+
+		try:
+			# 1. DB 설정값 확인
+			saved_initial = get_setting('initial_asset')
+			if saved_initial and str(saved_initial).lower() != 'none':
+				try:
+					self.initial_asset = int(float(str(saved_initial)))
+					if self.initial_asset > 0:
+						logger.info(f"금일 시초 자산 로드: {self.initial_asset:,.0f}원 (DB 설정)")
+						return
+				except (ValueError, TypeError):
+					pass
+
+			# 2. 설정값이 없으면 현재 총 자산으로 초기화
+			api = get_active_api()
+			cash_balance, _, deposit_amt = api.fn_kt00001('N', '', self.token)
+			stock_eval = api.get_total_eval_amt(self.token)
+			current_total = deposit_amt + stock_eval
+			
+			if current_total > 0:
+				self.initial_asset = current_total
+				from database_helpers import save_setting
+				save_setting('initial_asset', str(current_total))
+				logger.info(f"금일 시초 자산 설정: {self.initial_asset:,.0f}원 (현재 자산 기준)")
+			else:
+				self.initial_asset = 500000000 # 최후의 수단
+				logger.warning("자산 정보 획득 실패 - 기본값 5억 설정")
+				
+		except Exception as e:
+			logger.error(f"시초 자산 초기화 오류: {e}")
+			self.initial_asset = 500000000
 
 	async def _handle_set_command(self, key, value_str):
 		"""set 명령어를 처리하는 내부 함수"""

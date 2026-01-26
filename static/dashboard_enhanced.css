@@ -273,3 +273,10 @@ button, .btn, .btn-primary, .btn-secondary, .btn-danger {
     font-weight: 800 !important;
 }
 
+
+
+/* User Request: Unify Asset Value Sizes */
+#total-asset, #total-buy, #available-cash, #today-profit, #stock-value, #total-yield, #total-pl, #deposit { font-size: 2.8rem !important; font-weight: 900 !important; color: #f8fafc !important; }
+#total-buy { color: #4a9eff !important; text-shadow: 0 0 12px rgba(74, 158, 255, 0.2); }
+.summary-card:nth-child(2) { background: rgba(74, 158, 255, 0.12) !important; border: 1px solid rgba(74, 158, 255, 0.3) !important; box-shadow: 0 0 15px rgba(74, 158, 255, 0.1) inset; }
+.summary-card { min-height: 120px !important; }

@@ -25,7 +25,7 @@ def create_kiwoom_api(use_mock: bool = None) -> KiwoomAPI:
     if use_mock is None:
         try:
             from get_setting import get_setting
-            use_mock = get_setting('use_mock_server', True)
+            use_mock = get_setting('use_mock_server', False)
         except Exception as e:
             logger.warning(f"설정 조회 실패, 기본값(Mock API) 사용: {e}")
             use_mock = True
@@ -47,7 +47,7 @@ def get_api_status() -> dict:
     """
     try:
         from get_setting import get_setting
-        use_mock = get_setting('use_mock_server', True)
+        use_mock = get_setting('use_mock_server', False)
             
         return {
             "mode": "MOCK" if use_mock else "REAL",

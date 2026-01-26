@@ -38,7 +38,7 @@ def get_active_api():
     # 1. DB에서 실시간 상태 확인
     try:
         from database_helpers import get_setting
-        current_mock_setting = get_setting('use_mock_server', True)
+        current_mock_setting = get_setting('use_mock_server', False)
         current_paper_setting = get_setting('is_paper_trading', True)
         current_account = get_setting('my_account', None)
         
