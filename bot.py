@@ -88,6 +88,31 @@ class MainApp:
 		# [Heartbeat]
 		self._init_heartbeat()
 		
+		# [AI Recommender] - New
+		from ai_recommender import AIRecommender
+		self.ai_recommender = AIRecommender(self._on_ai_recommendation)
+		
+	def _on_ai_recommendation(self, code, source, ai_score, ai_reason):
+		"""AI 모델이 추천한 종목을 매수 대기열에 추가"""
+		try:
+			# 매수 로직 호출 (소스 명시)
+			# 비동기 루프로 스케줄링
+			if self.chat_command.token:
+				asyncio.run_coroutine_threadsafe(
+					self._async_chk_n_buy(code, self.chat_command.token, source, ai_score, ai_reason),
+					self.loop
+				)
+			else:
+				logger.warning(f"⚠️ [AI 추천 무시] 토큰 미발급 상태라 매수 불가: {code}")
+		except Exception as e:
+			logger.error(f"AI 추천 처리 실패: {e}")
+
+	async def _async_chk_n_buy(self, code, token, source, ai_score, ai_reason):
+		"""비동기 래퍼"""
+		await asyncio.get_event_loop().run_in_executor(
+			None, chk_n_buy, code, token, None, None, None, None, None, None, source, ai_score, ai_reason
+		)
+
 	def load_held_times(self):
 		"""DB에서 보유 시간 로드"""
 		try:
@@ -518,10 +543,13 @@ class MainApp:
 			# 1. 보유 종목 조회
 			# logger.debug("API 요청: get_account_data")
 			acnt_data = await loop.run_in_executor(None, get_account_data, 'N', '', self.chat_command.token)
-			if acnt_data:
+			if acnt_data and acnt_data[1]: # 요약 데이터(summary)가 있어야 정상 응답
 				current_stocks, acnt_summary = acnt_data
 			else:
-				current_stocks, acnt_summary = [], {}
+				# [Fix] 요약 데이터가 없으면 API 실패로 간주하여 빈 리스트로 덮어쓰지 않음
+				# (단, RealKiwoomAPI가 실패 시 ([], {})를 반환하므로 이를 감지)
+				logger.warning("[API Warning] 보유 종목 조회 실패 (Empty Summary) -> 기존 상태 유지")
+				current_stocks, acnt_summary = None, None
 				
 			# 2. 짧은 대기 (호출 집중 방지)
 			await asyncio.sleep(0.5)
@@ -642,10 +670,13 @@ class MainApp:
 						changed = True
 						logger.info(f"[Time-Cut] 신규 보유 감지: {code}")
 				# 삭제 처리
+				from database_helpers import delete_held_time
 				for code in list(self.held_since.keys()):
 					if code not in current_codes:
 						del self.held_since[code]
+						delete_held_time(code) # [Fix] DB에서도 삭제 (필수)
 						changed = True
+						logger.info(f"[Time-Cut] 보유 목록 이탈로 타이머 삭제: {code}")
 				if changed: self.save_held_times()
 
 	async def _process_watering_logic(self, current_stocks, balance_data, outstanding_orders=None):
@@ -1318,6 +1349,10 @@ class MainApp:
 				if not get_setting('use_mock_server', False):
 					self._optimize_stock_count_by_budget()
 
+				# [Start] AI 추천기 시작 (상시 체크)
+				if not self.ai_recommender.running:
+					self.ai_recommender.start()
+
 				# 1분 통계 기록
 				now = datetime.datetime.now()
 				if now.second == 0:
@@ -1332,6 +1367,7 @@ class MainApp:
 					await asyncio.sleep(1)
 
 
+					
 				# [Auto-Cancel] 미체결 매수 주문 자동 취소 (매도는 자동 취소 제외)
 				# [Throttle] 과도한 API 호출 방지 (20초에 한 번만 실행)
 				if time.time() - self.last_autocancel_time > 20: 
@@ -1388,7 +1424,30 @@ class MainApp:
 					except Exception as e:
 						logger.error(f"[AutoCancel] 로직 오류: {e}")
 
-
+				# [AI Queue Processing] 큐에 쌓인 AI 추천 처리
+				try:
+					import config
+					while config.ai_recommendation_queue:
+						item = config.ai_recommendation_queue.pop(0)
+						code = item['code']
+						
+						# 중복 매수 방지 (오늘 이미 시도했으면 스킵 - global set 활용)
+						# 하지만 '무조건 매수' 모드라면 이것도 무시 가능
+						
+						logger.info(f"🤖 [Queue Pop] AI 추천 매수 실행: {code} (점수:{item['ai_score']})")
+						
+						if self.chat_command.token:
+							await self._async_chk_n_buy(
+								code, 
+								self.chat_command.token, 
+								item['source'], 
+								item['ai_score'], 
+								item['ai_reason']
+							)
+						else:
+							logger.warning("⚠️ 토큰 미발급으로 매수 보류 (Queue에서 소멸)")
+				except Exception as e:
+					logger.error(f"AI Queue 처리 중 오류: {e}")
 
 				# 0.1초 대기 (응답성 향상)
 				await asyncio.sleep(0.1)

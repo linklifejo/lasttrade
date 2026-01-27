@@ -424,6 +424,13 @@ class RealTimeSearch:
 					# [Time-Cut Fix] bot.py의 held_since 참조가 있다면 같이 정리
 					if self.held_since_ref is not None and s in self.held_since_ref:
 						del self.held_since_ref[s]
+						# [Fix] DB에서도 보유 시간 기록 삭제 (재시작 시 좀비 타임 방지)
+						try:
+							from database_helpers import delete_held_time
+							delete_held_time(s)
+							logger.info(f"[Sync] {s} 보유 시간 DB 기록 삭제 완료")
+						except Exception as e:
+							logger.error(f"[Sync] 보유 시간 DB 삭제 실패: {e}")
 					
 					# [Core Fix] 수동 매도된 종목의 내부 누적 매입금 데이터 초기화 및 재매수 방지 시간 기록
 					# 이를 하지 않으면 check_n_buy에서 API 잔고(0)보다 내부 데이터(기존금액)를 우선하여 재매수할 수 있음
@@ -558,9 +565,10 @@ class RealTimeSearch:
 				# 매수 진행 중 체크
 				if code in self.buying_stocks: continue
 				
-				# [중요] 루프 도중에도 다른 스레드/비동기 작업에 의해 목표 수량이 채워졌는지 확인
-				if len(self.purchased_stocks) >= target_cnt:
-					logger.info(f"[Selection 중단] 목표 수량 달성 ({len(self.purchased_stocks)}/{target_cnt}) - 추가 매수 중단")
+				# [중요] 루프 도중에도 다른 스레드/비동기 작업에 의해 목표 수량이 채워졌는지 확인 (매수 진행 중인 종목 포함)
+				current_total_cnt = len(self.purchased_stocks) + len(self.buying_stocks)
+				if current_total_cnt >= target_cnt:
+					logger.info(f"[Selection 중단] 목표 수량 달성 ({len(self.purchased_stocks)} 보유 + {len(self.buying_stocks)} 진행 / {target_cnt} 목표) - 추가 매수 중단")
 					break
 				
 				# [Pending Check] 검증 대기 중인 종목도 보유 수량으로 간주하여 중복 매수 방지
@@ -739,18 +747,7 @@ class RealTimeSearch:
 			# [New] 자동 갱신 태스크 시작
 			self.refresh_task = asyncio.create_task(self._auto_refresh_loop())
 			
-			# [Diagnostic] 강제 종목 주입 (테스트용)
-			# 15초 뒤에 삼성전자(005930)를 강제로 발견한 것처럼 큐에 넣음
-			async def inject_test_stock():
-				await asyncio.sleep(15)
-				logger.info("🧪 [Test] 삼성전자(005930) 강제 매수 신호 주입!")
-				self.candidate_queue['005930'] = 10.0 # 등락률 10% 가정
-				# process_candidates 트리거
-				current_cnt = len(self.purchased_stocks)
-				target_cnt = self.target_cnt_cache
-				await self.process_candidates(current_cnt, target_cnt)
 
-			asyncio.create_task(inject_test_stock())
 
 			return True
 			
@@ -881,7 +878,7 @@ class RealTimeSearch:
 				# [Mod] 사용자 요청: 저가/동전주 전용 리스트 (비싼 종목 제거)
 				mock_stocks = [
 					# 대형 고가주
-					'005930', '000660', '035420', '051910', '068270', '006400', '005490', 
+ 
 					# 중형 중가주
 					'035720', '105560', '055550', '000270', '005380', '012330', '028260',
 					'096770', '009540', '003550', '066570', '018260', '352820',

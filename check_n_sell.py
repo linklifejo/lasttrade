@@ -417,12 +417,33 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						sold_stocks.append(stock_code)
 					continue
 
+				# [Source Tracking] 매수 당시 사유 조회하여 매도 사유에 출처 병기
+				origin_source = ""
+				try:
+					from database_helpers import get_db_connection
+					with get_db_connection() as conn:
+						# 가장 최근 매수 기록 조회
+						row = conn.execute(
+							"SELECT reason FROM trades WHERE code = ? AND type='buy' ORDER BY id DESC LIMIT 1",
+							(stock_code,)
+						).fetchone()
+						if row and row['reason']:
+							if "[모델추천]" in row['reason']:
+								origin_source = "[AI모델]"
+							elif "[검색식추천]" in row['reason']:
+								origin_source = "[검색식]"
+				except: pass
+
+				final_reason_text = f"{origin_source} {sell_reason}".strip()
+				sell_reasons[stock_code] = final_reason_text
+
 				# [DB 기록]
 				try:
 					from database_trading_log import log_sell_to_db
 					from kiwoom_adapter import get_current_api_mode
 					mode = get_current_api_mode().upper() 
-					log_sell_to_db(stock_code, stock['stk_nm'], int(stock['rmnd_qty']), int(stock.get('cur_prc', 0)), pl_rt, sell_reason, mode)
+					# [Fix] 수정한 사유(출처 포함)를 사용
+					log_sell_to_db(stock_code, stock['stk_nm'], int(stock['rmnd_qty']), int(stock.get('cur_prc', 0)), pl_rt, final_reason_text, mode)
 				except Exception as e:
 					logger.error(f"매도 로그 DB 저장 실패: {e}")
 				
@@ -460,7 +481,6 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 				logger.info(message)
 				
 				sold_stocks.append(stock_code)
-				sell_reasons[stock_code] = sell_reason
 				
 				# 재매수 쿨다운 (전량 매도일 때만 적용하여, 분할 매도 후 AI가 다시 사는 것 허용)
 				is_partial_sell = "축소" in sell_reason or "분할" in sell_reason or "PARTIAL" in sell_reason

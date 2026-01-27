@@ -158,6 +158,7 @@ class MarketHour:
 # [Global] 실시간 상태 추적
 outstanding_orders = {}
 stocks_being_sold = set() # 현재 매도 프로세스가 진행 중인 종목들
+ai_recommendation_queue = [] # [AI] 추천 대기열 (스레드에서 넣고 봇이 처리)
 
 
 # [API Helper] 현재 설정에 맞는 API 객체 반환

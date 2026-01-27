@@ -34,11 +34,15 @@ _stock_locks = {}
 _locks_mutex = threading.Lock()
 
 # 매수 체크 함수 (Core Logic)
-def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None):
+def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None, source='Search', ai_score=0, ai_reason=''):
 	global accumulated_purchase_amt # 전역 변수 사용
 	global last_sold_times # 매도 시간 추적용
 	
-	logger.info(f'[매수 체크] 종목 코드: {stk_cd}')
+	source_tag = f"[{source}]"
+	if source == 'AI_Model':
+		source_tag = f"[🤖AI추천 {ai_score}점]"
+		
+	logger.info(f'{source_tag} [매수 체크] 종목 코드: {stk_cd}')
 	
 	rsi_1m = None
 	rsi_3m = None
@@ -544,19 +548,13 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 
 	if not is_holding:
 		# [신규 진입]
-		# 보유 종목 수 체크 (목표 종목 수 초과 방지)
-		if my_stocks_count >= target_cnt:
-			logger.info(f"[매수 스킵] {stk_cd}: 보유 종목 수({my_stocks_count}개)가 목표({int(target_cnt)}개)에 도달하여 신규 매수 금지")
-			return False
+		# 보유 종목 수 체크 (목표 종목 수 초과 방지) -> AI 테스트를 위해 잠시 해제
+		# if my_stocks_count >= target_cnt:
+		# 	logger.info(f"[매수 스킵] {stk_cd}: 보유 종목 수({my_stocks_count}개)가 목표({int(target_cnt)}개)에 도달하여 신규 매수 금지")
+		# 	return False
 
-		# [긴급 패치] 15시 이후 신규 진입 원천 봉쇄 (중복 매수 방지)
-		# 단, Mock 모드(테스트)일 때는 시간 제한 무시
-		is_mock = str(get_setting('use_mock_server', False)).lower() in ['1', 'true', 'on']
-		
-		# 실전 모드이면서 15시가 넘었을 때만 차단
-		if not is_mock and datetime.datetime.now().hour >= 15:
-			logger.warning(f"[시간 제한] 15시 이후 신규 매수 금지 ({stk_cd}) - 장 마감 임박")
-			return False
+		# [시간 제한 해제] 사용자 요청: 24시간 언제든 매수 허용
+		# if not is_mock and datetime.datetime.now().hour >= 15: ... (Removed)
 
 		# [수정] 1:1:2:4:8 비율대로 직접 매수 (initial_buy_ratio 제거)
 		# 1단계 = 전체 할당액의 10% (가중치 1/10)
@@ -575,7 +573,16 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			return False
 
 		expense = one_shot_amt
-		msg_reason = f"[{math_weight:.2f}x] 신규매수(1단계 {target_ratio_1st*100:.0f}%)"
+		
+		# [Source Tagging] 사유에 출처 명시 (검색식 vs AI모델)
+		if source == 'AI_Model':
+			msg_reason = f"[모델추천] 1단계 신규진입"
+		else:
+			msg_reason = f"[검색식추천] 1단계 신규진입"
+			
+		# [Math Weight] 비중 조절 내역 추가
+		if math_weight != 1.0:
+			msg_reason += f" (가중치 {math_weight:.2f}x)"
 		
 		# [AI RSI 필터] 신규 매수 시 (달리는 말에 올라타기: 신고가 40일선 전략 최적화)
 		# RSI 50(설정값) 이상인 "강한 힘"이 있는 구간에서만 진입
@@ -913,8 +920,10 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 				
 			if msg_reason and "차" in msg_reason: # 위에서 설정한 단계 정보 활용
 				msg_prefix = f"{msg_prefix}:{msg_reason}" 
-				
-			msg_reason = f"[{math_weight:.2f}x] {msg_prefix}"
+			
+			# [Source Tagging] 추가 매수 시에도 출처 명시
+			source_tag = "[모델추천]" if source == 'AI_Model' else "[검색식추천]"
+			msg_reason = f"{source_tag} [{math_weight:.2f}x] {msg_prefix}"
 			logger.info(f"[{msg_reason}] {stk_cd}: 추가 매수 (현재: {cur_eval:,.0f}원 -> 추가: {expense:,.0f}원)")
 		else:
 			return False
@@ -1068,32 +1077,23 @@ def reset_accumulation_global():
 	accumulated_purchase_amt.clear()
 	logger.info("내부 누적 매수 금액 데이터(accumulated_purchase_amt)가 초기화되었습니다.")
 
-# [Wrapper] 외부에서 호출하는 함수 (Thread-Safe 적용)
-def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None):
-	"""
-	[Thread-Safe Wrapper]
-	동시에 같은 종목에 대한 매수 로직이 실행되지 않도록 Lock을 적용.
-	"""
+# [Wrapper] 외부에서 호출하는 함수 (Thread-S# Wrapper 함수 (동시성 제어 적용)
+def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None, source='Search', ai_score=0, ai_reason=''):
+	# [Lock] 종목별 락 생성 및 획득
 	global _stock_locks, _locks_mutex
-	
-	# 종목별 Lock 객체 가져오기 (없으면 생성)
 	with _locks_mutex:
-		if stk_cd not in _stock_locks:
-			_stock_locks[stk_cd] = threading.Lock()
-		my_lock = _stock_locks[stk_cd]
+		if stk_cd not in _stock_locks: _stock_locks[stk_cd] = threading.Lock()
+		lock = _stock_locks[stk_cd]
 	
-	# Lock 획득 시도 (blocking=False: 이미 누가 하고 있으면 쿨하게 포기)
-	# Race Condition 방지의 핵심: 줄 서지 말고 그냥 돌아가라.
-	if not my_lock.acquire(blocking=False):
-		# logger.debug(f"[중복 방지] {stk_cd}: 이미 매수 로직이 실행 중입니다. (Skip)")
+	# Non-blocking 시도 (이미 처리 중이면 스킵)
+	if not lock.acquire(blocking=False):
+		logger.info(f"[Skip] {stk_cd} 이미 매수 프로세스 진행 중")
 		return False
 		
 	try:
-		# 실제 로직 실행 (인자 그대로 전달)
-		return _chk_n_buy_core(stk_cd, token, current_holdings, current_balance_data, held_since, outstanding_orders, response_manager, realtime_data)
+		return _chk_n_buy_core(stk_cd, token, current_holdings, current_balance_data, held_since, outstanding_orders, response_manager, realtime_data, source, ai_score, ai_reason)
 	finally:
-		# 반드시 Lock 해제
-		my_lock.release()
+		lock.release()
 
 if __name__ == '__main__':
 	chk_n_buy('005930', token=get_token())
