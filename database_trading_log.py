@@ -17,7 +17,7 @@ def get_db_connection():
 	conn.row_factory = sqlite3.Row
 	return conn
 
-def log_buy_to_db(code, name, qty, price, mode=None, reason=""):
+def log_buy_to_db(code, name, qty, price, mode=None, reason="", source=""):
 	"""매수 로그 저장"""
 	if mode is None:
 		try:
@@ -45,16 +45,16 @@ def log_buy_to_db(code, name, qty, price, mode=None, reason=""):
 	try:
 		with get_db_connection() as conn:
 			conn.execute('''
-				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, avg_price, mode, reason, memo)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			''', (timestamp, 'buy', code, name, qty, price, amt, price, mode, reason,
+				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, avg_price, mode, reason, source, memo)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			''', (timestamp, 'buy', code, name, qty, price, amt, price, mode, reason, source,
 				 f"SIM_CONFIG:{config_id}, SIM_SCENARIO:{scenario_id}" if config_id or scenario_id else ""))
 			conn.commit()
 			logger.info(f"✅ 매수 로그 DB 저장: {name} {qty}주 @ {price:,}원 [{mode}] - {reason}")
 	except Exception as e:
 		logger.error(f"❌ 매수 로그 DB 저장 실패 ({name} @ {mode}): {e}")
 
-def log_sell_to_db(code, name, qty, price, profit_rate, reason, mode=None):
+def log_sell_to_db(code, name, qty, price, profit_rate, reason, mode=None, source=""):
 	"""매도 로그 저장"""
 	if mode is None:
 		try:
@@ -82,9 +82,9 @@ def log_sell_to_db(code, name, qty, price, profit_rate, reason, mode=None):
 	try:
 		with get_db_connection() as conn:
 			conn.execute('''
-				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, profit_rate, reason, mode, memo)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			''', (timestamp, 'sell', code, name, qty, price, amt, profit_rate, reason, mode,
+				INSERT INTO trades (timestamp, type, code, name, qty, price, amt, profit_rate, reason, mode, source, memo)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			''', (timestamp, 'sell', code, name, qty, price, amt, profit_rate, reason, mode, source,
 				 f"SIM_CONFIG:{config_id}, SIM_SCENARIO:{scenario_id}" if config_id or scenario_id else ""))
 			conn.commit()
 			logger.info(f"✅ 매도 로그 DB 저장: {name} {qty}주 @ {price:,}원 ({profit_rate:+.2f}%) [{mode}]" +
@@ -128,7 +128,7 @@ def get_trading_logs_from_db(mode=None, limit=10000, since_id=0, date=None):
 			# 매수 로그 조회
 			cursor = conn.execute(f'''
 				SELECT id, timestamp as time, code as stk_cd, name as stk_nm, 
-				       qty, price, amt, avg_price, mode, reason
+				       qty, price, amt, avg_price, mode, reason, source
 				FROM trades 
 				{where_clause}
 				ORDER BY id DESC 
@@ -148,7 +148,8 @@ def get_trading_logs_from_db(mode=None, limit=10000, since_id=0, date=None):
 					'avg_price': row['avg_price'],
 					'amt': row['amt'],
 					'mode': row['mode'],
-					'reason': row['reason'] or ''
+					'reason': row['reason'] or '',
+					'source': row['source'] or ''
 				})
 			
 			# 매도 로그 조회 (같은 로직 적용)
@@ -174,7 +175,7 @@ def get_trading_logs_from_db(mode=None, limit=10000, since_id=0, date=None):
 			
 			cursor = conn.execute(f'''
 				SELECT id, timestamp as time, code as stk_cd, name as stk_nm,
-				       qty, price, amt, profit_rate, reason, mode
+				       qty, price, amt, profit_rate, reason, mode, source
 				FROM trades 
 				{where_clause_sell}
 				ORDER BY id DESC 
@@ -195,7 +196,8 @@ def get_trading_logs_from_db(mode=None, limit=10000, since_id=0, date=None):
 					'yield': row['profit_rate'],
 					'profit_rate': row['profit_rate'],
 					'reason': row['reason'] or '',
-					'mode': row['mode']
+					'mode': row['mode'],
+					'source': row['source'] or ''
 				})
 			
 			return {'buys': buys, 'sells': sells}

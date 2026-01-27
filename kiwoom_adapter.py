@@ -131,11 +131,20 @@ def get_total_eval_amt(token=None) -> int:
     return get_api().get_total_eval_amt(token)
 
 
-def fn_kt10000(stk_cd, ord_qty, ord_uv, cont_yn='N', next_key='', token=None) -> Tuple[str, str]:
+def fn_kt10000(stk_cd, ord_qty, ord_uv, cont_yn='N', next_key='', token=None, source='Search') -> Tuple[str, str]:
     """주식 매수주문 (buy_stock.py 호환)"""
     if token is None:
         token = fn_au10001()
-    return get_api().buy_stock(stk_cd, ord_qty, ord_uv, token)
+    
+    api = get_api()
+    # [Single Logic] Mock/Real 모두 source 정보를 전달하도록 통일
+    # buy_stock 메서드가 source를 지원하는지 확인 (안전장치)
+    import inspect
+    sig = inspect.signature(api.buy_stock)
+    if 'source' in sig.parameters:
+        return api.buy_stock(stk_cd, ord_qty, ord_uv, token, source=source)
+            
+    return api.buy_stock(stk_cd, ord_qty, ord_uv, token)
 
 
 def fn_ka10004(stk_cd, cont_yn='N', next_key='', token=None) -> float:

@@ -308,7 +308,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 								stock['rmnd_qty'] = qty
 								try:
 									from database_trading_log import log_sell_to_db
-									log_sell_to_db(stock_code, stock_name, sell_qty, cur_prc_val, pl_rt, f"AI리스크({risk_reason})", mode_key)
+									trade_source = stock.get('trade_type', '-')
+									log_sell_to_db(stock_code, stock_name, sell_qty, cur_prc_val, pl_rt, f"AI리스크({risk_reason})", mode_key, trade_source)
 								except: pass
 							else:
 								logger.error(f"❌ [AI 리스크 매도] 실패: {res_msg}")
@@ -345,7 +346,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 								# DB 기록 (분할 매도 기록)
 								try:
 									from database_trading_log import log_sell_to_db
-									log_sell_to_db(stock_code, stock_name, sell_qty, cur_prc_val, pl_rt, f"AI판단({reason})", mode_key)
+									trade_source = stock.get('trade_type', '-')
+									log_sell_to_db(stock_code, stock_name, sell_qty, cur_prc_val, pl_rt, f"AI판단({reason})", mode_key, trade_source)
 								except: pass
 							else:
 								logger.error(f"❌ [AI 분할 매도] 실패: {res_msg}")
@@ -417,24 +419,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						sold_stocks.append(stock_code)
 					continue
 
-				# [Source Tracking] 매수 당시 사유 조회하여 매도 사유에 출처 병기
-				origin_source = ""
-				try:
-					from database_helpers import get_db_connection
-					with get_db_connection() as conn:
-						# 가장 최근 매수 기록 조회
-						row = conn.execute(
-							"SELECT reason FROM trades WHERE code = ? AND type='buy' ORDER BY id DESC LIMIT 1",
-							(stock_code,)
-						).fetchone()
-						if row and row['reason']:
-							if "[모델추천]" in row['reason']:
-								origin_source = "[AI모델]"
-							elif "[검색식추천]" in row['reason']:
-								origin_source = "[검색식]"
-				except: pass
-
-				final_reason_text = f"{origin_source} {sell_reason}".strip()
+				# [Source Fix] 가공하지 말고 실제 필드값 사용
+				trade_source = stock.get('trade_type', '-')
+				final_reason_text = sell_reason
 				sell_reasons[stock_code] = final_reason_text
 
 				# [DB 기록]
@@ -442,8 +429,8 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					from database_trading_log import log_sell_to_db
 					from kiwoom_adapter import get_current_api_mode
 					mode = get_current_api_mode().upper() 
-					# [Fix] 수정한 사유(출처 포함)를 사용
-					log_sell_to_db(stock_code, stock['stk_nm'], int(stock['rmnd_qty']), int(stock.get('cur_prc', 0)), pl_rt, final_reason_text, mode)
+					# [Fix] 가공하지 않은 사유와 소스 사용
+					log_sell_to_db(stock_code, stock['stk_nm'], int(stock['rmnd_qty']), int(stock.get('cur_prc', 0)), pl_rt, final_reason_text, mode, trade_source)
 				except Exception as e:
 					logger.error(f"매도 로그 DB 저장 실패: {e}")
 				

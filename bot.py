@@ -34,6 +34,7 @@ from analyze_tools import get_rsi_for_timeframe
 class MainApp:
 	def __init__(self):
 		self.chat_command = ChatCommand()
+		self.loop = None  # To be set in run()
 		
 
 			
@@ -78,8 +79,9 @@ class MainApp:
 		try:
 			from database_helpers import save_setting
 			save_setting('split_buy_cnt', 4)
+			save_setting('target_stock_count', 5)
 			save_setting('single_stock_strategy', 'WATER')
-			logger.info("[Settings] 분할 매수 4회 & 물타기(WATER) 모드로 강제 설정 완료")
+			logger.info("[Settings] 5종목 운영, 분할 매수 4회 & 물타기(WATER) 모드로 강제 설정 완료")
 		except: pass
 		
 		# [Math] response_manager 전달
@@ -1090,6 +1092,7 @@ class MainApp:
 
 	async def run(self):
 		"""메인 실행 루프"""
+		self.loop = asyncio.get_running_loop()
 		logger.info("="*50)
 		logger.info("키움 자동매매 봇 시작")
 		logger.info("="*50)
@@ -1343,11 +1346,9 @@ class MainApp:
 						logger.error(f"[MainLoop] 주기적 루프 오류:\n{traceback.format_exc()}")
 						await asyncio.sleep(5) # 오류 시 대기
 						
-				# [AI Smart Count] Real 모드일 경우 상시 예산 최적화 (수동 전환 대응)
-				# 단, 너무 빈번한 호출을 막기 위해 10초에 한 번만 체크하거나, 
-				# _optimize 메서드 내부에서 값 변경 시에만 로그를 찍도록 되어 있으므로 안전함.
-				if not get_setting('use_mock_server', False):
-					self._optimize_stock_count_by_budget()
+				# [AI Smart Count] 자동 보정 비활성화 (사용자 요청: 5종목 고정)
+				# if not get_setting('use_mock_server', False):
+				# 	self._optimize_stock_count_by_budget()
 
 				# [Start] AI 추천기 시작 (상시 체크)
 				if not self.ai_recommender.running:

@@ -192,7 +192,7 @@ class MockKiwoomAPI(KiwoomAPI):
         try:
             with get_db_connection() as conn:
                 cursor = conn.execute('''
-                    SELECT h.code, s.name, h.qty, h.avg_price, p.current, h.current_price as last_h_price
+                    SELECT h.code, s.name, h.qty, h.avg_price, p.current, h.current_price as last_h_price, h.source
                     FROM mock_holdings h
                     LEFT JOIN mock_stocks s ON h.code = s.code
                     LEFT JOIN mock_prices p ON h.code = p.code
@@ -204,6 +204,7 @@ class MockKiwoomAPI(KiwoomAPI):
                     qty = row['qty']
                     avg_price = row['avg_price']
                     current = row['current'] if row['current'] is not None else row['last_h_price']
+                    source = row['source'] if 'source' in row.keys() and row['source'] else '조건식' # 기본값
                     
                     buy_amt = int(qty * avg_price)
                     eval_amt = int(qty * current)
@@ -219,7 +220,8 @@ class MockKiwoomAPI(KiwoomAPI):
                         "pchs_amt": str(buy_amt),
                         "evlu_amt": str(eval_amt),
                         "pl_amt": str(pl),
-                        "pl_rt": f"{pl_rt:.2f}"
+                        "pl_rt": f"{pl_rt:.2f}",
+                        "trade_type": source # [UI 표시용]
                     })
                     total_eval += eval_amt
                     total_pl += pl
@@ -238,7 +240,7 @@ class MockKiwoomAPI(KiwoomAPI):
         stocks, _ = self.get_account_data(token)
         return stocks
 
-    def buy_stock(self, stk_cd: str, ord_qty: str, ord_uv: str, token: str) -> Tuple[str, str]:
+    def buy_stock(self, stk_cd: str, ord_qty: str, ord_uv: str, token: str, source: str = '검색식') -> Tuple[str, str]:
         try:
             qty = int(ord_qty)
             price = int(ord_uv)
@@ -263,8 +265,7 @@ class MockKiwoomAPI(KiwoomAPI):
                     conn.execute('INSERT OR IGNORE INTO mock_prices (code, current, last_update) VALUES (?, ?, datetime("now"))', (stk_cd, new_base))
                     p_row = {'current': new_base}
                 
-                # 1. 실제 가격에 슬리피지(Slippage) 적용 (단타 전략의 혹독한 환경 모사)
-                # 매수 시에는 현재가보다 조금 비싸게(0.05%) 체결됨
+                # 1. 실제 가격에 슬리피지(Slippage) 적용
                 slippage_rate = float(get_setting('mock_slippage_rate', 0.05)) / 100.0
                 actual_price = int(p_row['current'] * (1 + slippage_rate))
                 
@@ -273,14 +274,16 @@ class MockKiwoomAPI(KiwoomAPI):
                 # 계좌 차감
                 conn.execute('UPDATE mock_account SET cash = cash - ? WHERE id=1', (actual_amt,))
                 
-                # 보유 종목 업데이트
+                # [Root Fix] 보유 종목 업데이트 시 source(검색식/모델)를 필수로 저장
                 h_row = conn.execute('SELECT qty, avg_price FROM mock_holdings WHERE code=?', (stk_cd,)).fetchone()
                 if h_row:
                     new_qty = h_row['qty'] + qty
                     new_avg = (h_row['qty'] * h_row['avg_price'] + actual_amt) / new_qty
-                    conn.execute('UPDATE mock_holdings SET qty=?, avg_price=?, updated_at=datetime("now") WHERE code=?', (new_qty, new_avg, stk_cd))
+                    # 기존 UPDATE 문에 source=? 추가
+                    conn.execute('UPDATE mock_holdings SET qty=?, avg_price=?, updated_at=datetime("now"), source=? WHERE code=?', (new_qty, new_avg, source, stk_cd))
                 else:
-                    conn.execute('INSERT INTO mock_holdings (code, qty, avg_price, current_price, updated_at) VALUES (?, ?, ?, ?, datetime("now"))', (stk_cd, qty, actual_price, actual_price))
+                    # 기존 INSERT 문에 source 추가 확인
+                    conn.execute('INSERT INTO mock_holdings (code, qty, avg_price, current_price, updated_at, source) VALUES (?, ?, ?, ?, datetime("now"), ?)', (stk_cd, qty, actual_price, actual_price, source))
                 
                 s_row = conn.execute('SELECT name FROM mock_stocks WHERE code=?', (stk_cd,)).fetchone()
                 if s_row: actual_name = s_row['name']

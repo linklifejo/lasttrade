@@ -254,7 +254,10 @@ function updateHoldingsTable(stocks) {
         const rateClass = rate >= 0 ? 'profit-cell' : 'loss-cell';
         const pnlClass = pnl >= 0 ? 'profit-cell' : 'loss-cell';
 
-        return { name, avg_prc, rate, pnl, qty, cur_prc, hold_time, water_step, rateClass, pnlClass };
+        // [DB Source Logic] Raw value from DB
+        const tradeType = stock.trade_type || '-';
+
+        return { name, avg_prc, rate, pnl, qty, cur_prc, hold_time, water_step, rateClass, pnlClass, tradeType };
     }).sort((a, b) => a.name.localeCompare(b.name));
 
     // 4. 기존 DOM 행 관리 (Name 기준)
@@ -277,11 +280,15 @@ function updateHoldingsTable(stocks) {
     stocksData.forEach((data, index) => {
         let row = rowMap.get(data.name);
 
+        // [Source Column Logic] Raw Text
+        const sourceHtml = `<span>${data.tradeType}</span>`;
+
         if (!row) {
             // 새 행 생성
             row = document.createElement('tr');
             row.innerHTML = `
                 <td class="stress stock-name-cell">${data.name}</td>
+                <td class="text-center">${sourceHtml}</td>
                 <td class="avg-price-cell"></td>
                 <td class="rate-cell"></td>
                 <td class="pnl-cell"></td>
@@ -306,14 +313,18 @@ function updateHoldingsTable(stocks) {
 
         // 셀 데이터 업데이트 (변경된 경우에만)
         const cells = {
-            avg: row.querySelector('.avg-price-cell') || row.cells[1],
-            rate: row.querySelector('.rate-cell') || row.cells[2],
-            pnl: row.querySelector('.pnl-cell') || row.cells[3],
-            qty: row.querySelector('.qty-cell') || row.cells[4],
-            price: row.querySelector('.price-cell') || row.cells[5],
-            time: row.querySelector('.time-cell') || row.cells[6],
-            step: row.querySelector('.step-cell') || row.cells[7]
+            source: row.querySelector('.text-center') || row.cells[1],
+            avg: row.querySelector('.avg-price-cell') || row.cells[2],
+            rate: row.querySelector('.rate-cell') || row.cells[3],
+            pnl: row.querySelector('.pnl-cell') || row.cells[4],
+            qty: row.querySelector('.qty-cell') || row.cells[5],
+            price: row.querySelector('.price-cell') || row.cells[6],
+            time: row.querySelector('.time-cell') || row.cells[7],
+            step: row.querySelector('.step-cell') || row.cells[8]
         };
+
+        // 구분 (Source) 업데이트
+        if (cells.source.innerHTML !== sourceHtml) cells.source.innerHTML = sourceHtml;
 
         // 평균단가
         const avgText = formatNumber(data.avg_prc);
@@ -560,6 +571,7 @@ function renderFilteredLogs(filterType) {
 
     theadTr.innerHTML = `
         <th>시간</th>
+        <th>구분</th>
         <th>종목명</th>
         <th>${typeHeader}</th>
         <th>수량</th>
@@ -568,13 +580,13 @@ function renderFilteredLogs(filterType) {
     `;
 
     if (displayLogs.length === 0) {
-        tbody.innerHTML = `<tr class="empty-row"><td colspan="6">조회된 데이터가 없습니다.</td></tr>`;
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="7">조회된 데이터가 없습니다.</td></tr>`;
     } else {
         // [Fix] HTML 문자열로 먼저 조립 후 한 번에 업데이트 (Diff Check 포함)
         let newHtml = '';
 
         if (displayLogs.length === 0) {
-            newHtml = `<tr class="empty-row"><td colspan="6">조회된 데이터가 없습니다.</td></tr>`;
+            newHtml = `<tr class="empty-row"><td colspan="7">조회된 데이터가 없습니다.</td></tr>`;
         } else {
             displayLogs.forEach(log => {
                 const logTime = getTime(log);
@@ -584,6 +596,7 @@ function renderFilteredLogs(filterType) {
                 const price = parseFloat(log.price || log.avg_price || 0);
                 const qty = parseInt(log.qty || 0);
                 const totalAmt = Math.floor(price * qty).toLocaleString() + '원';
+                const source = log.source || '-';
 
                 let rowContent = '';
                 if (log.type === 'Buy') {
@@ -592,6 +605,7 @@ function renderFilteredLogs(filterType) {
                         : `<td style="color:#10b981; font-weight:bold;" class="text-center">매수</td>`;
                     rowContent = `
                     <td class="text-center">${timePart}</td>
+                    <td class="text-center">${source}</td>
                     <td class="stress text-center">${logName}</td>
                     ${typeCell}
                     <td class="text-center">${qty}주</td>
@@ -613,6 +627,7 @@ function renderFilteredLogs(filterType) {
 
                     rowContent = `
                     <td class="text-center">${timePart}</td>
+                    <td class="text-center">${source}</td>
                     <td class="stress text-center">${logName}</td>
                     ${typeCell}
                     <td class="text-center">${qty}주</td>

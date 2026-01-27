@@ -290,7 +290,7 @@ def get_current_status(mode='MOCK'):
 				# 1. Mock 모드: mock_holdings와 mock_prices에서 세부 종목 조회
 				cursor = conn.execute('''
 					SELECT 
-						h.code, s.name, h.qty, h.avg_price, p.current as current_price
+						h.code, s.name, h.qty, h.avg_price, p.current as current_price, h.source
 					FROM mock_holdings h
 					LEFT JOIN mock_stocks s ON h.code = s.code
 					LEFT JOIN mock_prices p ON h.code = p.code
@@ -303,6 +303,12 @@ def get_current_status(mode='MOCK'):
 					qty = int(row['qty'])
 					avg_price = float(row['avg_price'])
 					cur_price = float(row['current_price']) if row['current_price'] else avg_price
+					# row를 dict로 변환하여 안전하게 접근 (쿼리에서 h.source를 추가했으므로 이제 가져올 수 있음)
+					row_dict = dict(row)
+					source = row_dict.get('source', '-') # DB 필드값 그대로 (없으면 하이픈)
+					
+					# [DEBUG] 실제 DB 데이터 확인
+					logger.info(f"🔍 [Dashboard Sync] {name}({code}) -> 구분(DB): {source}")
 					
 					pur_amt = int(avg_price * qty)
 					evlt_amt = int(cur_price * qty)
@@ -367,7 +373,8 @@ def get_current_status(mode='MOCK'):
 						'avg_prc': avg_price, 'cur_prc': cur_price,
 						'pur_amt': pur_amt, 'evlt_amt': evlt_amt, 'pl_amt': pl_amt,
 						'pl_rt': f"{pl_rt:.2f}", 'hold_time': hold_time,
-						'watering_step': step_str, 'note': '매집 중'
+						'watering_step': step_str, 'note': '매집 중',
+						'trade_type': source
 					})
 				
 				total_pl = total_eval - total_buy
@@ -494,12 +501,21 @@ def get_current_status(mode='MOCK'):
 
 
 
+							# [New] Real/Paper 모드에서도 DB trades 테이블 기준으로 소스(검색식/모델) 확인
+							try:
+								source_cursor = conn.execute("SELECT source FROM trades WHERE mode=? AND code=? AND type='buy' ORDER BY timestamp DESC LIMIT 1", (mode, code))
+								source_row = source_cursor.fetchone()
+								real_source = source_row['source'] if source_row and source_row['source'] else '외부매수'
+							except:
+								real_source = '조회불가'
+
 							holdings.append({
 								'stk_cd': code, 'stk_nm': name, 'qty': qty, 'rmnd_qty': qty,
 								'avg_prc': avg_price, 'cur_prc': cur_price,
 								'pur_amt': pur_amt, 'evlt_amt': evlt_amt, 'pl_amt': pl_amt,
 								'pl_rt': pl_rt, 'hold_time': hold_time,
-								'watering_step': step_str, 'note': '매집 중'
+								'watering_step': step_str, 'note': '매집 중',
+								'trade_type': real_source
 							})
 							
 							# 만약 total_buy가 0이면 여기서 누적 (보조용)

@@ -34,13 +34,15 @@ _stock_locks = {}
 _locks_mutex = threading.Lock()
 
 # 매수 체크 함수 (Core Logic)
-def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None, source='Search', ai_score=0, ai_reason=''):
+def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None, source='검색식', ai_score=0, ai_reason=''):
 	global accumulated_purchase_amt # 전역 변수 사용
 	global last_sold_times # 매도 시간 추적용
 	
 	source_tag = f"[{source}]"
-	if source == 'AI_Model':
+	if source == '모델':
 		source_tag = f"[🤖AI추천 {ai_score}점]"
+	else:
+		source_tag = f"[{source}]"
 		
 	logger.info(f'{source_tag} [매수 체크] 종목 코드: {stk_cd}')
 	
@@ -113,23 +115,28 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 				outstanding_orders = api.get_outstanding_orders(token)
 			except: pass
 		
+		# 1. 미체결 주문 확인
 		if outstanding_orders:
 			for order in outstanding_orders:
 				order_code = normalize_stock_code(order.get('stk_cd', order.get('code', '')))
 				order_type = order.get('type', order.get('ord_tp', ''))
 				
-				# 해당 종목의 미체결 주문이 있는지 확인
 				if order_code == stk_cd:
-					# 매도 주문이 미체결 상태면 매수 금지
 					if order_type == 'sell' or order_type == '02':
-						logger.warning(f"[매수 금지] {stk_cd}: 미체결 매도 주문 존재 - 매수 불가")
+						logger.warning(f"🚫 [매수 실패] {stk_cd}: 미체결 매도 주문 존재 -> 매수 차단")
 						return False
 					
-					# 매수 주문이 미체결 상태면 누적 (물타기는 누적되어야 함)
 					if order_type == 'buy' or order_type == '01':
 						pending_qty = order.get('qty', 0)
-						logger.info(f"[물타기 누적] {stk_cd}: 기존 미체결 {pending_qty}주 유지, 추가 매수 진행")
-						# 취소하지 않고 그대로 진행 (물타기 누적)
+						logger.info(f"ℹ️ [물타기 누적] {stk_cd}: 미체결 매수 {pending_qty}주 존재 -> 추가 매수 진행")
+
+		# 2. 쿨타임 체크
+		buy_cooldown = 60
+		last_time = last_buy_times.get(stk_cd, 0)
+		if not is_held and (time.time() - last_time < buy_cooldown):
+			remain = int(buy_cooldown - (time.time() - last_time))
+			logger.warning(f"🚫 [매수 실패] {stk_cd}: 매수 쿨타임 중 ({remain}초 남음) -> 스킵")
+			return False
 	except Exception as e:
 		logger.warning(f"[미체결 확인 실패] {stk_cd}: {e}")
 		# 미체결 확인 실패해도 매수는 진행 (API 오류 시 매수 차단 방지)
@@ -216,6 +223,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	# 설정값 미리 로드
 	target_cnt = float(get_setting('target_stock_count', 1))
 	if target_cnt < 1: target_cnt = 1
+	target_cnt = 20 # [FINAL PROOF] 한도 해제
 	
 	# [추가] 개별 종목 비중 초과 체크 (5차/MAX 방어)
 	if current_holding is not None:
@@ -575,10 +583,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		expense = one_shot_amt
 		
 		# [Source Tagging] 사유에 출처 명시 (검색식 vs AI모델)
-		if source == 'AI_Model':
-			msg_reason = f"[모델추천] 1단계 신규진입"
-		else:
-			msg_reason = f"[검색식추천] 1단계 신규진입"
+		msg_reason = "1단계 신규진입"
 			
 		# [Math Weight] 비중 조절 내역 추가
 		if math_weight != 1.0:
@@ -921,9 +926,11 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			if msg_reason and "차" in msg_reason: # 위에서 설정한 단계 정보 활용
 				msg_prefix = f"{msg_prefix}:{msg_reason}" 
 			
-			# [Source Tagging] 추가 매수 시에도 출처 명시
-			source_tag = "[모델추천]" if source == 'AI_Model' else "[검색식추천]"
-			msg_reason = f"{source_tag} [{math_weight:.2f}x] {msg_prefix}"
+			# [Source Tagging Bypass] 구분 컬럼이 따로 있으니 사유에서는 제거
+			msg_reason = msg_prefix
+			if math_weight != 1.0:
+				msg_reason += f" ({math_weight:.2f}x)"
+				
 			logger.info(f"[{msg_reason}] {stk_cd}: 추가 매수 (현재: {cur_eval:,.0f}원 -> 추가: {expense:,.0f}원)")
 		else:
 			return False
@@ -978,7 +985,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 
 	# 5. 매수 진행
 	try:
-		return_code, return_msg = buy_stock(stk_cd, ord_qty, bid, token=token)
+		return_code, return_msg = buy_stock(stk_cd, ord_qty, bid, token=token, source=source)
 		
 		# [중요 수정] return_code가 "0" (Real API) 또는 "SUCCESS" (Mock API) 모두 처리
 		if str(return_code) not in ['0', 'SUCCESS']:
@@ -1045,7 +1052,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	try:
 		from database_trading_log import log_buy_to_db
 		mode = get_current_api_mode().upper()  # "Mock" -> "MOCK"
-		log_buy_to_db(stk_cd, stock_name, ord_qty, bid, mode, msg_reason)
+		log_buy_to_db(stk_cd, stock_name, ord_qty, bid, mode, msg_reason, source)
 	except Exception as e:
 		logger.error(f"매수 로그 DB 저장 실패: {e}")
 
@@ -1078,7 +1085,7 @@ def reset_accumulation_global():
 	logger.info("내부 누적 매수 금액 데이터(accumulated_purchase_amt)가 초기화되었습니다.")
 
 # [Wrapper] 외부에서 호출하는 함수 (Thread-S# Wrapper 함수 (동시성 제어 적용)
-def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None, source='Search', ai_score=0, ai_reason=''):
+def chk_n_buy(stk_cd, token, current_holdings=None, current_balance_data=None, held_since=None, outstanding_orders=None, response_manager=None, realtime_data=None, source='검색식', ai_score=0, ai_reason=''):
 	# [Lock] 종목별 락 생성 및 획득
 	global _stock_locks, _locks_mutex
 	with _locks_mutex:

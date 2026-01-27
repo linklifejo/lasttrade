@@ -306,7 +306,7 @@ class RealKiwoomAPI(KiwoomAPI):
             logger.error(f"총 평가금액 계산 중 오류: {e}")
             return 0
     
-    def buy_stock(self, stk_cd: str, ord_qty: str, ord_uv: str, token: str) -> Tuple[str, str]:
+    def buy_stock(self, stk_cd: str, ord_qty: str, ord_uv: str, token: str, source: str = '검색식') -> Tuple[str, str]:
         """주식 매수 주문"""
         endpoint = '/api/dostk/ordr'
         url = self.host_url + endpoint
