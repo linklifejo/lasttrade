@@ -6,8 +6,8 @@ import os
 import json
 import time
 
-# [SYSTEM] FINAL VERSION v2.6 - AI Recommender & Source Classification Integrated
-# This version includes full integration of AI recommendations, DB source tagging, and dashboard display.
+# [SYSTEM] FINAL VERSION v2.7 - AI Recommender & Late Market Super Filter Integrated
+# v2.7: Added time-based AI score hurdles and hard-stop for late-market new buys.
 import sys
 import threading
 import subprocess
