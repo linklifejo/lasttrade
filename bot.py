@@ -1,9 +1,13 @@
+import aiosqlite
 import asyncio
 import aiohttp
 import datetime
 import os
 import json
 import time
+
+# [SYSTEM] FINAL VERSION v2.6 - AI Recommender & Source Classification Integrated
+# This version includes full integration of AI recommendations, DB source tagging, and dashboard display.
 import sys
 import threading
 import subprocess

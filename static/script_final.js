@@ -1,7 +1,7 @@
 ﻿/**
- * Kiwoom Trading Bot Web Dashboard
- * Enhanced Version - Windows GUI Style
- * Real-time updates via WebSocket + Settings Management + Bot Control
+ * Kiwoom Trading Bot Web Dashboard - LASTTRADE
+ * [SYSTEM] FINAL VERSION v2.6 - AI Recommender & Source Classification Integrated
+ * Stable build for automated trading and AI monitoring.
  */
 
 // --- Global State Management ---
@@ -596,7 +596,25 @@ function renderFilteredLogs(filterType) {
                 const price = parseFloat(log.price || log.avg_price || 0);
                 const qty = parseInt(log.qty || 0);
                 const totalAmt = Math.floor(price * qty).toLocaleString() + '원';
-                const source = log.source || '-';
+
+                // [Fix] 구분(Source) 정보 추출 로직 강화
+                let source = log.source || log.trade_source || log.trade_type || '';
+                const reason = log.reason || '';
+
+                // 사유에 [모델추천] 등이 포함되어 있으면 그것을 우선 사용 (스크린샷 기반)
+                if (!source || source === '-') {
+                    if (reason.includes('[모델추천]')) source = '모델';
+                    else if (reason.includes('[검색추천]')) source = '조건식';
+                    else if (reason.includes('[AI]')) source = 'AI';
+                    else source = '조건식'; // 기본값
+                }
+
+                // 배지 스타일 적용
+                const isModel = (source.includes('모델') || source.includes('AI'));
+                const badgeStyle = isModel
+                    ? 'background-color:#8b5cf6; color:white; padding:2px 6px; border-radius:4px; font-size:0.85em;'
+                    : 'background-color:#4b5563; color:white; padding:2px 6px; border-radius:4px; font-size:0.85em;';
+                const sourceBadge = `<span style="${badgeStyle}">${source}</span>`;
 
                 let rowContent = '';
                 if (log.type === 'Buy') {
@@ -605,17 +623,16 @@ function renderFilteredLogs(filterType) {
                         : `<td style="color:#10b981; font-weight:bold;" class="text-center">매수</td>`;
                     rowContent = `
                     <td class="text-center">${timePart}</td>
-                    <td class="text-center">${source}</td>
+                    <td class="text-center">${sourceBadge}</td>
                     <td class="stress text-center">${logName}</td>
                     ${typeCell}
                     <td class="text-center">${qty}주</td>
                     <td class="text-center">-</td>
-                    <td class="text-center">${log.reason || '-'}</td>
+                    <td class="text-center">${reason || '-'}</td>
                 `;
                 } else {
                     const rate = parseFloat(log.yield || log.profit_rate || 0);
                     const rateClass = rate > 0 ? 'profit-cell' : 'loss-cell';
-                    const reason = log.reason || '-';
                     const isTC = reason.includes('TimeCut') || reason.includes('시간제한');
                     let lastCell = `<td class="text-center">${reason}</td>`;
                     if (filterType === 'timecut') {
@@ -627,7 +644,7 @@ function renderFilteredLogs(filterType) {
 
                     rowContent = `
                     <td class="text-center">${timePart}</td>
-                    <td class="text-center">${source}</td>
+                    <td class="text-center">${sourceBadge}</td>
                     <td class="stress text-center">${logName}</td>
                     ${typeCell}
                     <td class="text-center">${qty}주</td>
