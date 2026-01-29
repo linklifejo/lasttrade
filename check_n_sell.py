@@ -224,19 +224,43 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			if cur_step >= split_buy_cnt: step_info = "MAX"
 
 			# --------------------------------------------------------------------------------
-			# [PRIORITY 0] 상한가/급등 매도 (최우선 순위)
+			# [PRIORITY 0] 상한가/급등 매도 (최우선 순위 - Absolute Day Change 기준)
 			# --------------------------------------------------------------------------------
 			if not should_sell:
-				ul_val = cached_setting('upper_limit_rate', 29.5) # [Safety] 29.5 복구
+				ul_val = cached_setting('upper_limit_rate', 29.0) # 기본 29%
 				try: UPPER_LIMIT = float(ul_val)
-				except: UPPER_LIMIT = 29.5
+				except: UPPER_LIMIT = 29.0
 				
-				# [Double Check] API수익률 OR 실시간계산수익률 둘 중 하나라도 만족하면 매도
-				if pl_rt >= UPPER_LIMIT:
-					should_sell = True
-					sell_reason = f"상한가({step_info})"
-					logger.info(f"🚀 [LASTTRADE 상한가] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도 (Priority 0)")
-					speak(f"축하합니다. {stock_name} 종목이 상한가에 도달하여 전량 매도합니다.")
+				# [v3.2] 내 수익률(pl_rt)이 아니라 '전일 종가 대비 등락률'을 체크해야 함
+				# stock['day_rt'] 또는 현재가/전일종가 계산 필력이 필요
+				try:
+					# Kiwoom OPW00018 등에서는 전일종가가 없으므로, 현재가와 수익률로 역산하거나 
+					# 실시간 데이터의 등락률 필드를 확인해야 함. 
+					# 여기서는 안전하게 '현재가'가 전일대비 약 29% 이상인지 체크하는 로직 보강
+					# (보통 API에서 제공하는 수익률 외에 종목 등락률 정보가 있으면 그것을 우선 사용)
+					day_range_rt = float(stock.get('day_rt', 0)) # 만약 API에서 제공한다면
+					
+					# 만약 day_rt가 없다면, 내 수익률과 매입 시점의 가격을 고려하여 추정하거나 
+					# 별도 필드(예: flct_rt)가 있는지 확인
+					if day_range_rt == 0:
+						# 실전/모의 계좌 응답 필드 중 등락률 필드(예: flct_rt, day_rt) 탐색
+						for r_key in ['day_rt', 'flct_rt', 'price_rate']:
+							if r_key in stock and stock[r_key]:
+								day_range_rt = float(str(stock[r_key]).replace('%',''))
+								break
+					
+					# [핵심] 내 수익률이 UPPER_LIMIT보다 높거나, 종목의 당일 등락률이 UPPER_LIMIT보다 높으면 매도
+					if pl_rt >= UPPER_LIMIT or day_range_rt >= UPPER_LIMIT:
+						should_sell = True
+						sell_reason = f"상한가({step_info})"
+						logger.info(f"🚀 [Limit Up Detection] {stock_name}: 당일등락률 {day_range_rt}% 또는 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 즉시 매도")
+						speak(f"경하드립니다. {stock_name} 종목이 상한가 권역에 진입하여 즉시 수익을 실현합니다.")
+				except Exception as e:
+					# 역산 실패 시 기존 수익률 방식 유지 (안전장치)
+					if pl_rt >= UPPER_LIMIT:
+						should_sell = True
+						sell_reason = f"상한가({step_info})"
+						logger.info(f"🚀 [Classic Limit Up] {stock_name}: 수익률 {pl_rt}% >= {UPPER_LIMIT}% -> 매도")
 
 			# [Early Stop Logic] 사용자 설정값(Early Stop Step) 적용
 			# 기본값: 설정 없으면 '분할횟수-1' (자동)

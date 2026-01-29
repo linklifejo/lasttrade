@@ -6,8 +6,8 @@ import os
 import json
 import time
 
-# [SYSTEM] FINAL VERSION v3.1 - Dynamic Portfolio Size Fix & Total Account Protection
-# v3.1: Removed hardcoded stock limit (20). respects DB setting (5).
+# [SYSTEM] FINAL VERSION v3.2 - Absolute Limit Up Detection & Turbo TS Integrated
+# v3.2: Detects stock's absolute day change for limit-up selling. (N2N Fix)
 import sys
 import threading
 import subprocess
