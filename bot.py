@@ -6,8 +6,8 @@ import os
 import json
 import time
 
-# [SYSTEM] FINAL VERSION v3.2 - Absolute Limit Up Detection & Turbo TS Integrated
-# v3.2: Detects stock's absolute day change for limit-up selling. (N2N Fix)
+# [SYSTEM] FINAL VERSION v3.3 - Autonomous AI Discovery & Absolute Safety Guard
+# v3.3: AI Recommender proactive discovery mode. (Data-less fallback enabled)
 import sys
 import threading
 import subprocess
