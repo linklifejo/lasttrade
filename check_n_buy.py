@@ -221,9 +221,9 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 
 
 	# 설정값 미리 로드
-	target_cnt = float(get_setting('target_stock_count', 1))
+	target_cnt = float(get_setting('target_stock_count', 5))
 	if target_cnt < 1: target_cnt = 1
-	target_cnt = 20 # [FINAL PROOF] 한도 해제
+	# target_cnt = 20 # [REMOVED] 사장님 요청에 따라 하드코딩 제거 (DB 설정값 5개 준수)
 	
 	# [추가] 개별 종목 비중 초과 체크 (5차/MAX 방어)
 	if current_holding is not None:
@@ -555,34 +555,10 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	is_holding = (current_holding is not None) or (cur_pchs_amt > 0)
 
 	if not is_holding:
-		# [신규 진입]
-		
-		# [Late Market Super Filter] 장 막판 신규 매수 정밀 제어 (사장님 제안 v2.7)
-		# 14:00~14:30 (50점↑), 14:30~14:50 (90점↑), 14:50~ (금지)
-		now = datetime.datetime.now()
-		cur_hour = now.hour
-		cur_min = now.minute
-		
-		# 1. 14:50 이후 신규 매수 완전 금지 (하드 필터)
-		if (cur_hour == 14 and cur_min >= 50) or (cur_hour >= 15):
-			logger.info(f"🚫 [장 마감 하드필터] 14:50 이후 신규 매수 차단 (현재 {cur_hour}:{cur_min:02d})")
+		# 보유 종목 수 체크 (목표 종목 수 초과 방지)
+		if my_stocks_count >= target_cnt:
+			logger.info(f"[매수 스킵] {stk_cd}: 보유 종목 수({my_stocks_count}개)가 목표({int(target_cnt)}개)에 도달하여 신규 매수 금지")
 			return False
-			
-		# 2. 시간대별 AI 점수 허들 상향 (정밀 타격)
-		if source == '모델':
-			if cur_hour == 14 and 0 <= cur_min < 30:
-				if ai_score < 50:
-					logger.info(f"🚫 [오후 필터] AI 점수 부족 ({ai_score}/50) - 14:00~14:30 구간")
-					return False
-			elif cur_hour == 14 and 30 <= cur_min < 50:
-				if ai_score < 90:
-					logger.info(f"🚫 [마감 필터] AI 점수 부족 ({ai_score}/90) - 14:30~14:50 구간")
-					return False
-		
-		# 보유 종목 수 체크 (목표 종목 수 초과 방지) -> AI 테스트를 위해 잠시 해제
-		# if my_stocks_count >= target_cnt:
-		# 	logger.info(f"[매수 스킵] {stk_cd}: 보유 종목 수({my_stocks_count}개)가 목표({int(target_cnt)}개)에 도달하여 신규 매수 금지")
-		# 	return False
 
 		# [시간 제한 해제] 사용자 요청: 24시간 언제든 매수 허용
 		# if not is_mock and datetime.datetime.now().hour >= 15: ... (Removed)

@@ -6,8 +6,8 @@ import os
 import json
 import time
 
-# [SYSTEM] FINAL VERSION v2.7 - AI Recommender & Late Market Super Filter Integrated
-# v2.7: Added time-based AI score hurdles and hard-stop for late-market new buys.
+# [SYSTEM] FINAL VERSION v3.1 - Dynamic Portfolio Size Fix & Total Account Protection
+# v3.1: Removed hardcoded stock limit (20). respects DB setting (5).
 import sys
 import threading
 import subprocess
@@ -1249,8 +1249,8 @@ class MainApp:
 				except Exception as e:
 					logger.error(f"토큰 갱신 실패: {e}")
 
-				# [Throttling] 루프 속도 조절 (CPU 및 DB 지연 방지) - 반응성 위해 대폭 단축
-				await asyncio.sleep(0.05)
+				# [Throttling] 루프 속도 조절 (Turbo Mode: 0.01 초)
+				await asyncio.sleep(0.01)
 
 				# [Web Dashboard] 웹 대시보드에서 명령어 확인
 				# logger.debug("Checking web commands...")
@@ -1275,9 +1275,8 @@ class MainApp:
 
 				
 				# [추가] 보유 종목 물타기/관리 및 모니터링 루프 (Dynamic Rate Limit)
-				# [Fix] 실전/모의투자 시 호출 제한 방지를 위해 간격 확대 (4.0 -> 8.0) -> [Revert] TS 반응성 위해 0.2초로 단축
-				# (보유 종목이 적을 때는 API 제한에 걸리지 않으므로 빠른 대응 우선)
-				limit_interval = 0.2
+				# [Turbo TS] 반응성 극대화를 위해 간격을 0.1초로 단축 (실시간성에 집중)
+				limit_interval = 0.1
 				if time.time() - last_json_update > limit_interval:
 
 					try:

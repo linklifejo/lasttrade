@@ -761,34 +761,35 @@ class ChatCommand:
 			return False
 
 	async def _init_daily_asset(self):
-		"""일일 시초 자산을 초기화하거나 로드합니다."""
-		# [Mod] 5억 고정 대신 설정값 또는 현재가 로드 (Mock 모드 자동종료 방지)
+		"""일일 시초 자산을 초기화하거나 로드합니다. (9:00 기준선 고정)"""
 		from get_setting import get_setting
+		from database_helpers import save_setting
 		from kiwoom_adapter import get_active_api
 
+		today_str = datetime.datetime.now().strftime('%Y%m%d')
+		
 		try:
-			# 1. DB 설정값 확인
+			# 1. 오늘 날짜의 기준선이 이미 있는지 확인
+			saved_date = get_setting('initial_asset_date')
 			saved_initial = get_setting('initial_asset')
-			if saved_initial and str(saved_initial).lower() != 'none':
-				try:
-					self.initial_asset = int(float(str(saved_initial)))
-					if self.initial_asset > 0:
-						logger.info(f"금일 시초 자산 로드: {self.initial_asset:,.0f}원 (DB 설정)")
-						return
-				except (ValueError, TypeError):
-					pass
+			
+			if saved_date == today_str and saved_initial:
+				self.initial_asset = int(float(str(saved_initial)))
+				logger.info(f"📅 오늘({today_str})의 시초 자산 기준선 로드: {self.initial_asset:,.0f}원")
+				return
 
-			# 2. 설정값이 없으면 현재 총 자산으로 초기화
+			# 2. 없거나 날짜가 지났으면 새로 설정 (9:00 첫 실행 시)
 			api = get_active_api()
-			cash_balance, _, deposit_amt = api.fn_kt00001('N', '', self.token)
+			# 잔액 및 평가금 합산하여 순수 자산(NAV) 계산
+			_, _, deposit_amt = api.fn_kt00001('N', '', self.token)
 			stock_eval = api.get_total_eval_amt(self.token)
 			current_total = deposit_amt + stock_eval
 			
 			if current_total > 0:
 				self.initial_asset = current_total
-				from database_helpers import save_setting
 				save_setting('initial_asset', str(current_total))
-				logger.info(f"금일 시초 자산 설정: {self.initial_asset:,.0f}원 (현재 자산 기준)")
+				save_setting('initial_asset_date', today_str)
+				logger.info(f"🆕 오늘({today_str})의 시초 자산 기준선 신규 설정: {self.initial_asset:,.0f}원")
 			else:
 				self.initial_asset = 500000000 # 최후의 수단
 				logger.warning("자산 정보 획득 실패 - 기본값 5억 설정")

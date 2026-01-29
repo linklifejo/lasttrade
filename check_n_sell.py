@@ -25,8 +25,12 @@ get_balance = fn_kt00001
 # {code: timestamp} - 마지막 분할 매도 시간 기록
 ai_partial_sold_history = {}
 
+# [Turbo TS] 고점 기록 메모리 캐시 (DB 지연 박멸)
+# {code: float_high_price}
+HIGH_PRICE_MEM_CACHE = {}
+
 def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, outstanding_orders=None, realtime_prices=None):
-	global ai_partial_sold_history
+	global ai_partial_sold_history, HIGH_PRICE_MEM_CACHE
 	partially_sold_codes = set() # 한 루프 내 중복 방지용 로컬 세트
 
 	# [설정 로드]
@@ -258,20 +262,34 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 						sell_reason = f"TimeCut({step_info}, {elapsed_sec/60:.0f}분)"
 						logger.info(f"[Time-Cut] {stock_name}: {elapsed_sec/60:.0f}분 경과, 수익률({pl_rt}%) < 기준 -> 교체 매매")
 
-			# 1. [트레일링 스탑]
+			# 1. [트레일링 스탑] (Turbo TS: Memory Cache Optimized)
 			if not should_sell and USE_TRAILING:
+				# 고점 업데이트 (메모리 우선)
 				if pl_rt >= TS_ACTIVATION:
 					if cur_prc_val > 0:
-						update_high_price_sync(stock_code, cur_prc_val)
+						# 메모리 최신값 확인 및 업데이트
+						mem_high = HIGH_PRICE_MEM_CACHE.get(stock_code, 0)
+						if cur_prc_val > mem_high:
+							HIGH_PRICE_MEM_CACHE[stock_code] = cur_prc_val
+							# DB는 비동기적으로(또는 백그라운드에서) 업데이트하면 좋지만, 
+							# 여기서는 지연 박멸을 위해 메모리만 즉시 갱신하고 루프 밖에서 처리하거나 그대로 둠
+							# (지연의 주범인 sync 호출 제거)
 				
-				high_prc = get_high_price_sync(stock_code)
+				# 고점 로드 (메모리 우선, 없으면 DB에서 1회 로드)
+				high_prc = HIGH_PRICE_MEM_CACHE.get(stock_code, 0)
+				if high_prc <= 0:
+					high_prc = get_high_price_sync(stock_code)
+					if high_prc > 0:
+						HIGH_PRICE_MEM_CACHE[stock_code] = high_prc
+				
 				if high_prc > 0:
 					drop_rate = ((high_prc - cur_prc_val) / high_prc) * 100
 					
 					if drop_rate >= TS_CALLBACK and pl_rt > 0:
 						should_sell = True
 						sell_reason = f"TrailingStop({step_info})"
-						logger.info(f"🛡️ [LASTTRADE TS] {stock_name}: 고점({high_prc}) 대비 {drop_rate:.2f}% 하락 (현재수익률: {pl_rt:.2f}%)")
+						logger.info(f"🛡️ [Turbo TS] {stock_name}: 고점({high_prc:,.0f}) 대비 {drop_rate:.2f}% 하락 (현재수익률: {pl_rt:.2f}%)")
+						# 매도 성공 시 메모리 캐시 삭제는 아래 매도 로직 이후 수행
 
 			# 2. [조기 손절 / MAX 손절 / AI 리스크 관리]
 			if not should_sell and single_strategy == "WATER":
@@ -416,8 +434,16 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 					# Ghost Stock 처리
 					if '800033' in str(return_msg): # 매도수량 부족 -> 잔고 없음
 						logger.warning(f"[Ghost Stock 감지] {stock_name}: 강제 삭제 처리")
+						# [Turbo TS] 고스트 종목도 캐시 삭제
+						if stock_code in HIGH_PRICE_MEM_CACHE:
+							del HIGH_PRICE_MEM_CACHE[stock_code]
 						sold_stocks.append(stock_code)
 					continue
+				
+				# [Turbo TS] 매도 성공 시 메모리 캐시 삭제 (다음 매매를 위해 리셋)
+				if stock_code in HIGH_PRICE_MEM_CACHE:
+					del HIGH_PRICE_MEM_CACHE[stock_code]
+					logger.info(f"[Turbo TS] {stock_name} 고점 기록 리셋 완료")
 
 				# [Source Fix] 가공하지 말고 실제 필드값 사용
 				trade_source = stock.get('trade_type', '-')
