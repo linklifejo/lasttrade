@@ -236,7 +236,7 @@ class SettingsFrame(ttk.Frame):
 
         add_field("target_stock_count", "최대 보유 종목 수 (Max Stocks)", 
                  "동시에 보유할 최대 종목 개수 (분산 투자)", "int", 
-                 ["1", "3", "5", "10", "20", "30", "50"])
+                 ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "15", "20", "30", "50"])
 
         add_field("trading_capital_ratio", "매매 자금 비율 (%) (Capital Ratio)", 
                  "총 자산 중 몇 %를 매매에 사용할까요?\n예: 70.0 입력 시 → 총 자산의 70%만 매매에 사용", "float", 

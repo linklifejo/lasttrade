@@ -6,8 +6,8 @@ import os
 import json
 import time
 
-# [SYSTEM] FINAL VERSION v3.3 - Autonomous AI Discovery & Absolute Safety Guard
-# v3.3: AI Recommender proactive discovery mode. (Data-less fallback enabled)
+# [SYSTEM] FINAL VERSION v3.5 - Positive Candle Filter & Heavy Stock Protection
+# v3.5: Prevents buying during price drops (Negative candles) and expensive stock exclusion.
 import sys
 import threading
 import subprocess

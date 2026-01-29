@@ -68,7 +68,8 @@
             margin-bottom: 8px;
         }
 
-        .field input {
+        .field input,
+        .field select {
             width: 100%;
             padding: 15px;
             font-size: 16px;
@@ -80,7 +81,8 @@
             transition: border-color 0.3s;
         }
 
-        .field input:focus {
+        .field input:focus,
+        .field select:focus {
             outline: none;
             border-color: #4a9eff;
         }
@@ -217,7 +219,21 @@
 
             <div class="field">
                 <label>목표 보유 종목 수 (Target Stock Count)</label>
-                <input type="number" id="target_stock_count" placeholder="예: 5" min="1" max="20">
+                <select id="target_stock_count">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                    <option value="9">9</option>
+                    <option value="10">10</option>
+                    <option value="12">12</option>
+                    <option value="15">15</option>
+                    <option value="20">20</option>
+                </select>
                 <div class="desc">동시에 운용할 최대 종목 수 (예수금에 맞춰 자동 최적화될 수 있음)</div>
             </div>
         </div>

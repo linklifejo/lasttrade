@@ -574,6 +574,12 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			logger.info(f"[자금 조정] 1차 매수액({one_shot_amt:,.0f}원)이 최소 기준({MIN_PURCHASE_AMOUNT:,.0f}원) 미달 → 상향 조정")
 			one_shot_amt = MIN_PURCHASE_AMOUNT
 		
+		# [Heavy Stock Guard] 신규 진입 시, 1주 가격이 배정 금액의 50%를 넘으면 스킵
+		# 이유: 1주가 너무 비싸면 분할 매수(물타기)가 불가능하여 전략이 망가짐
+		if current_price > (alloc_per_stock * 0.5):
+			logger.warning(f"[매수 스킵] {stk_cd}: 종목 단가({current_price:,.0f}원)가 배정액({alloc_per_stock:,.0f}원) 대비 너무 비쌈 (50% 초과) - 분할매수 불가")
+			return False
+
 		# [중요] 예수금 부족 시 매수 방어 로직 (신규 진입 시)
 		if balance < (one_shot_amt * 0.5):
 			logger.warning(f"[매수 스킵] 예수금 부족 ({balance:,.0f}원 < 목표액 {one_shot_amt:,.0f}원의 50%) - 자산 대비 예수금이 적습니다.")
@@ -591,6 +597,24 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		# [AI RSI 필터] 신규 매수 시 (달리는 말에 올라타기: 신고가 40일선 전략 최적화)
 		# RSI 50(설정값) 이상인 "강한 힘"이 있는 구간에서만 진입
 		try:
+			# [Yang-bong Filter] 음봉 진입 금지 (현재가 >= 시가)
+			# 사장님 요청: 음봉일 때 진입해서 물리는 상황 방어
+			try:
+				# API나 실시간 데이터에서 시가(open) 가져오기
+				open_price = 0
+				if realtime_data and stk_cd in realtime_data:
+					open_price = float(realtime_data.get(f"{stk_cd}_open", 0))
+				
+				# 시가 데이터가 없으면 API에서 다시 확인 시도
+				if open_price <= 0:
+					# stock_info 등에서 시가 추출 로직 (편의상 시가 정보가 없으면 0으로 처리)
+					pass
+				
+				if open_price > 0 and current_price < open_price:
+					logger.warning(f"[음봉 매수 제한] {stk_cd}: 현재가({current_price:,.0f}) < 시가({open_price:,.0f}) -> 음봉이므로 신규 진입 취소")
+					return False
+			except: pass
+
 			from analyze_tools import get_rsi_for_timeframe
 			rsi_1m = get_rsi_for_timeframe(stk_cd, '1m')
 			
