@@ -6,8 +6,8 @@ import os
 import json
 import time
 
-# [SYSTEM] FINAL VERSION v3.5 - Positive Candle Filter & Heavy Stock Protection
-# v3.5: Prevents buying during price drops (Negative candles) and expensive stock exclusion.
+# [SYSTEM] FINAL VERSION v3.6 - Hardened Yang-bong Filter & Heavy Stock Protection
+# v3.6: Strict positive candle validation (API-backed) and expensive stock exclusion.
 import sys
 import threading
 import subprocess

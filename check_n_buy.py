@@ -600,20 +600,27 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			# [Yang-bong Filter] 음봉 진입 금지 (현재가 >= 시가)
 			# 사장님 요청: 음봉일 때 진입해서 물리는 상황 방어
 			try:
-				# API나 실시간 데이터에서 시가(open) 가져오기
+				# 1. 캐시(realtime_data)에서 시가(open) 확인
 				open_price = 0
 				if realtime_data and stk_cd in realtime_data:
 					open_price = float(realtime_data.get(f"{stk_cd}_open", 0))
 				
-				# 시가 데이터가 없으면 API에서 다시 확인 시도
+				# 2. 캐시 없으면 API에서 직접 현재가 정보(시가 포함) 가져오기
 				if open_price <= 0:
-					# stock_info 등에서 시가 추출 로직 (편의상 시가 정보가 없으면 0으로 처리)
-					pass
+					from kiwoom_adapter import get_api
+					api = get_api()
+					stock_info = api.get_stock_info(stk_cd, token=token)
+					if stock_info:
+						open_price = float(stock_info.get('open', stock_info.get('OPEN', 0)))
 				
-				if open_price > 0 and current_price < open_price:
-					logger.warning(f"[음봉 매수 제한] {stk_cd}: 현재가({current_price:,.0f}) < 시가({open_price:,.0f}) -> 음봉이므로 신규 진입 취소")
-					return False
-			except: pass
+				if open_price > 0:
+					if current_price < open_price:
+						logger.warning(f"[음봉 매수 제한] {stk_cd}: 현재가({current_price:,.0f}) < 시가({open_price:,.0f}) -> 파란불(음봉)이므로 신규 진입 취소")
+						return False
+					else:
+						logger.info(f"✅ [양봉 확인] {stk_cd}: 현재가({current_price:,.0f}) >= 시가({open_price:,.0f}) -> 진입 허용")
+			except Exception as e:
+				logger.warning(f"⚠️ [Yang-bong Check Error] {e}")
 
 			from analyze_tools import get_rsi_for_timeframe
 			rsi_1m = get_rsi_for_timeframe(stk_cd, '1m')
