@@ -6,8 +6,8 @@ import os
 import json
 import time
 
-# [SYSTEM] FINAL VERSION v3.6 - Hardened Yang-bong Filter & Heavy Stock Protection
-# v3.6: Strict positive candle validation (API-backed) and expensive stock exclusion.
+# [SYSTEM] FINAL VERSION v3.7 - Strict 5-Stock Limit & Heavy Stock Protection
+# v3.7: Permanent disable of Auto-Count. Forces 5-stock limit. API-backed Yang-bong filter.
 import sys
 import threading
 import subprocess
@@ -1349,7 +1349,7 @@ class MainApp:
 						logger.error(f"[MainLoop] 주기적 루프 오류:\n{traceback.format_exc()}")
 						await asyncio.sleep(5) # 오류 시 대기
 						
-				# [AI Smart Count] 자동 보정 비활성화 (사용자 요청: 5종목 고정)
+				# [AI Smart Count] 자동 보정 영구 비활성화 (사용자 요청: 5종목 엄격 준수)
 				# if not get_setting('use_mock_server', False):
 				# 	self._optimize_stock_count_by_budget()
 
