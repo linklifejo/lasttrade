@@ -103,49 +103,24 @@ if __name__ == "__main__":
     print("💡 Press Ctrl+C in this window to STOP ALL systems safely.")
     
     try:
-        # 4. 메인 루프 (프로세스 모니터링)
-        print("\n⏳ Monitoring processes (5s grace period)...")
-        time.sleep(5) 
-
-        while True:
-            time.sleep(5)
-            # 프로세스 생존 여부 체크 (로그만 남김)
-            if server_process.poll() is not None: pass
-            if wd_process.poll() is not None: pass
-                
+        # 4. 프로세스 상태 확인 (5초 딜레이)
+        print("\n⏳ Verifying startup (5s)...")
+        time.sleep(5)
+        
+        server_alive = server_process.poll() is None
+        wd_alive = wd_process.poll() is None
+        
+        if server_alive and wd_alive:
+            print("✅ All systems operational.")
+            print("👋 Launcher exiting... (Services run in background)")
+            sys.exit(0)
+        else:
+            print("❌ Some services failed to start.")
+            if not server_alive: print("   - Web Server failed")
+            if not wd_alive: print("   - Watchdog failed")
+            
     except KeyboardInterrupt:
-        print("\n\n🛑 Stopping system requested by user...")
-    
-    finally:
-        # 5. 종료 시 자동 청소
-        print("🧹 Performing safe shutdown...")
-        for proc in [server_process, wd_process]:
-            try:
-                if proc.poll() is None:
-                    proc.terminate()
-            except: pass
+        print("\n\n🛑 Start aborted.")
         
-        time.sleep(1)
-        
-        # stop.py 호출로 최종 정리 (동기 실행)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        stop_script = os.path.join(script_dir, 'stop.py')
-        
-        print("🧹 Running cleanup script...")
-        try:
-            result = subprocess.run(
-                [sys.executable, stop_script],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            if result.stdout:
-                print(result.stdout)
-        except subprocess.TimeoutExpired:
-            print("⚠️ Cleanup timeout - forcing exit")
-        except Exception as e:
-            print(f"⚠️ Cleanup error: {e}")
-        
-        print("👋 Bye!")
-        sys.exit(0)
+    # Launcher가 종료되어도 자식 프로세스는 CREATE_NEW_CONSOLE로 독립 실행 중이므로 유지됨
 

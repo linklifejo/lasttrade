@@ -96,7 +96,8 @@ graph TD
 ### 🧠 핵심 매매 엔진 (Logic & Brain)
 가장 중요한 로직들이 모여 있는 영역입니다.
 *   **`bot.py`**: 시스템의 메인 루프. 전체 흐름 제어, 모드 전환(Real/Mock), 스케줄링.
-*   **`check_n_buy.py`**: **매수 판단**. 물타기 단계 계산(1:1:2:4), 불타기, 진입 금지 필터링.
+*   **`check_n_buy.py`**: **매수 판단**. 물타기 단계 계산(1:1:2:4), 불타기, **QuickHunter AI 필터링** (3분 내 급등 확률 판독).
+*   **`ai_hunter_inference.py`**: **[New] AI 급등 판독기**. 학습된 `QuickHunter_3min.pth` 모델을 사용하여 매수 시점의 성공 확률을 실시간 추론.
 *   **`check_n_sell.py`**: **매도 판단**. 조기 손절(4차), 익절, MAX 단계 손절, 장 마감 청산.
 *   **`optimize_settings.py`**: **자금 최적화**. 예수금 부족 시 목표 종목 수를 자동으로 줄여서 분할 매수 원칙을 사수함.
 *   **`kiwoom_adapter.py`**: **통신**. 키움 실전/모의투자 및 자체 Mock 서버와의 통신을 표준화하여 연결.
@@ -137,8 +138,8 @@ graph TD
     *   `watchdog`: 봇이 살아있는지 계속 감시.
 4.  **장 마감**:
     *   보유 종목 일괄 청산 (설정에 따라).
-    *   `learn_daily.py`: 하루 매매 복기 및 AI 학습 (15:40).
-    *   **Incremental Learning (증분 학습)**: AI 학습의 효율성을 위해, 전체 과거 데이터를 매번 재학습하는 비효율을 제거하고 **기존 모델(`DL_stock_model.pth`)에 최신 데이터(최근 2일 + 당일 분봉)만 추가 학습**하는 방식을 채택한다.
+    *   `train_quick_hunter.py`: **[QuickHunter]** 3분 내 3% 급등 패턴을 학습하는 초경량 Transformer 모델 학습 엔진.
+    *   **Incremental Learning (증분 학습)**: AI 학습의 효율성을 위해, 기존 모델(`QuickHunter_3min.pth`)에 최신 데이터(당일 분봉)를 추가하여 지속적으로 진화하는 방식 채택.
     *   **Logic Evolution (Full-Auto)**: 성과 분석 결과에 따라 `logic_evolver.py`가 코드를 자동 패치.
     *   자동 종료.
 

@@ -42,11 +42,23 @@ class TechnicalJudge:
             score -= 10
             reasons.append("역배열/하락 추세")
             
-        # 최종 결정
-        threshold = 20 # 20점 이상이면 매수 승인
+        # 최종 결정 (시간 적응형 문턱 적용)
+        import datetime
+        from kiwoom_adapter import get_current_api_mode
+        
+        now = datetime.datetime.now()
+        current_mode = get_current_api_mode()
+        
+        threshold = 20 # 기본 문턱
+        
+        # [Time-Adaptive] 키움 실전(Real) 모드에서만 14:00 이후 문턱을 40점으로 상향 (2배 엄격)
+        if current_mode == "Real" and now.hour >= 14:
+            threshold = 40
+            logger.info(f"⏰ [Time-Adaptive] 14시 실전 모드 판독 문턱 상향 적용 ({threshold}점)")
+
         passed = score >= threshold
         
-        status_msg = f"점수: {score} | 사유: {', '.join(reasons)}"
+        status_msg = f"점수: {score} (기준: {threshold}) | 사유: {', '.join(reasons)}"
         logger.info(f"⚖️ [Technical Judge] {code} 판독 결과 -> {'✅ 승인' if passed else '❌ 거절'} ({status_msg})")
         
         return passed, status_msg

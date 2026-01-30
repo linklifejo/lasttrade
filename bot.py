@@ -99,19 +99,9 @@ class MainApp:
 		self.ai_recommender = AIRecommender(self._on_ai_recommendation)
 		
 	def _on_ai_recommendation(self, code, source, ai_score, ai_reason):
-		"""AI 모델이 추천한 종목을 매수 대기열에 추가"""
-		try:
-			# 매수 로직 호출 (소스 명시)
-			# 비동기 루프로 스케줄링
-			if self.chat_command.token:
-				asyncio.run_coroutine_threadsafe(
-					self._async_chk_n_buy(code, self.chat_command.token, source, ai_score, ai_reason),
-					self.loop
-				)
-			else:
-				logger.warning(f"⚠️ [AI 추천 무시] 토큰 미발급 상태라 매수 불가: {code}")
-		except Exception as e:
-			logger.error(f"AI 추천 처리 실패: {e}")
+		"""AI 모델이 추천한 종목 무시 (사용자 요청으로 비활성화)"""
+		# logger.info(f"🚫 [AI 추천 차단] {code} (점수: {ai_score}) - 모델 매수 기능이 비활성화 상태입니다.")
+		return 
 
 	async def _async_chk_n_buy(self, code, token, source, ai_score, ai_reason):
 		"""비동기 래퍼"""
@@ -1353,9 +1343,9 @@ class MainApp:
 				# if not get_setting('use_mock_server', False):
 				# 	self._optimize_stock_count_by_budget()
 
-				# [Start] AI 추천기 시작 (상시 체크)
-				if not self.ai_recommender.running:
-					self.ai_recommender.start()
+				# [Start] AI 추천기 시작 (사용자 요청: 비활성화)
+				# if not self.ai_recommender.running:
+				# 	self.ai_recommender.start()
 
 				# 1분 통계 기록
 				now = datetime.datetime.now()

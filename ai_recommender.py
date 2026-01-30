@@ -19,17 +19,10 @@ class AIRecommender:
         self.thread = None
         self.interval = 10 # 10초마다 스캔
         
-        # [Model Loader] 학습된 모델 파일 존재 여부 확인
-        # 1. 딥러닝 모델 (.pth, .h5) 우선 탐색
-        model_path = "DL_stock_model.pth" # 예상 파일명
-        if os.path.exists(model_path):
-            self.model_name = "DeepPrediction_v2 (Trained)"
-            self.use_dl_model = True
-            logger.info(f"💾 [AI Init] 학습된 모델 발견: {model_path} -> 로드 준비")
-        else:
-            self.model_name = "RuleBased_Analysis (Fallback)"
-            self.use_dl_model = False
-            logger.warning("⚠️ [AI Init] 학습된 모델 파일 없음. 임시 Rule-Based 로직 사용.")
+        # [AI Init] 기존 딥러닝 모델(DL_stock_model.pth)은 폐기됨
+        self.model_name = "RuleBased_Analysis (Fallback)"
+        self.use_dl_model = False
+        logger.info("🤖 [AI Init] 추천 엔진이 Rule-Based 모드로 대기 중입니다.")
 
 
     def start(self):

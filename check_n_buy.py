@@ -14,6 +14,7 @@ from technical_judge import technical_judge
 from utils import normalize_stock_code
 from candle_manager import candle_manager
 from stock_info import fn_ka10001 as stock_info
+from ai_hunter_inference import ai_hunter
 
 # Aliases for compatibility
 get_balance = fn_kt00001
@@ -222,10 +223,38 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	# [Memory Cache 방어] API와 DB 모두 실패해도, 봇 실행 중 매수했던 기록이 있으면 차단
 
 
-	# 설정값 미리 로드
-	target_cnt = float(get_setting('target_stock_count', 5))
-	if target_cnt < 1: target_cnt = 1
-	# target_cnt = 20 # [REMOVED] 사장님 요청에 따라 하드코딩 제거 (DB 설정값 5개 준수)
+	# [Time-Adaptive Entry] 시간대별 매수 문턱 및 슬롯 자동 조절 (유저 요청)
+	# 1. 기본 설정값 로드 (금액 배분 기준)
+	setting_target_cnt = float(get_setting('target_stock_count', 5))
+	if setting_target_cnt < 1: setting_target_cnt = 1
+	
+	# 2. 동적 슬롯 제한 (신규 진입 제어용)
+	dynamic_max_stocks = setting_target_cnt
+	
+	now = datetime.datetime.now()
+	now_hm = now.hour * 100 + now.minute
+	# 3. 시간 적응형 필터 (키움 실전 모드에서만 활성화 - 유저 요청)
+	current_mode = get_current_api_mode()
+	
+	if current_mode == "Real":
+		if now_hm >= 1450: # 14:50 ~ 장 마감: 신규 진입 절대 금지
+			if current_holding is None:
+				logger.warning(f"⏰ [Time-Adaptive] 14:50 이후 신규 진입 금지 ({stk_cd})")
+				return False
+		elif now_hm >= 1400: # 14:00 ~ 14:50: 대장주 1종목만 허용
+			if my_stocks_count >= 1 and current_holding is None:
+				logger.warning(f"⏰ [Time-Adaptive] 14시 이후 슬롯 1개로 제한 (현재 {my_stocks_count}개 보유 중)")
+				return False
+			dynamic_max_stocks = 1
+		elif now_hm >= 1300: # 13:00 ~ 14:00: 종목 압축 3개로 제한
+			if my_stocks_count >= 3 and current_holding is None:
+				logger.info(f"⏰ [Time-Adaptive] 13시 이후 슬롯 3개로 제한 (현재 {my_stocks_count}개 보유 중)")
+				return False
+			dynamic_max_stocks = min(setting_target_cnt, 3)
+
+	# 최종 사용할 target_cnt (코어 로직 호환성 유지)
+	# [Logic] 신규 진입 판정은 dynamic_max_stocks를 쓰고, 금액 배분은 안전을 위해 setting_target_cnt를 사용
+	target_cnt = setting_target_cnt 
 	
 	# [추가] 개별 종목 비중 초과 체크 (5차/MAX 방어)
 	if current_holding is not None:
@@ -248,11 +277,11 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 
 	# 신규 매수인 경우 (보유하지 않은 종목)
 	if current_holding is None:
-		# 이미 목표 종목 수에 도달했으면 신규 매수 금지
-		if my_stocks_count >= int(target_cnt):
-			logger.warning(f"[종목수 제한] {stk_cd}: 현재 {my_stocks_count}개 보유 중 (목표: {int(target_cnt)}개) - 신규 매수 불가 (Deep Count)")
+		# 이미 목표 종목 수에 도달했으면 신규 매수 금지 (dynamic_max_stocks 적용)
+		if my_stocks_count >= int(dynamic_max_stocks):
+			logger.warning(f"[종목수 제한] {stk_cd}: 현재 {my_stocks_count}개 보유 중 (오후 제한 슬롯: {int(dynamic_max_stocks)}개) - 신규 매수 불가")
 			return False
-		logger.info(f"[신규 매수 가능] {stk_cd}: 현재 {my_stocks_count}개 보유 중 (목표: {int(target_cnt)}개)")
+		logger.info(f"[신규 매수 가능] {stk_cd}: 현재 {my_stocks_count}개 보유 중 (슬롯: {int(dynamic_max_stocks)}개)")
 		
 	# time.sleep(0.3)
 	
@@ -356,6 +385,23 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	if not is_passed:
 		logger.warning(f"⚖️ [Technical Judge] {stk_cd}: 매수 거절 - {judge_msg}")
 		return False
+		
+	# [New] QuickHunter AI 필터 - 3분 내 급등 확률 체크 (신입 진입 시에만)
+	if current_holding is None:
+		try:
+			hunter_prob = ai_hunter.get_prediction(stk_cd)
+			hunter_limit = float(get_setting('ai_hunter_min_prob', 0.6))
+			
+			# 실전 모드에서만 로그 출력 및 필터링 (Mock에서는 로그만)
+			is_real = (get_current_api_mode() == "Real")
+			log_level = logger.info if hunter_prob >= hunter_limit else logger.warning
+			log_level(f"🎯 [QuickHunter] {stk_cd} 급등 확률: {hunter_prob*100:.1f}% (기준: {hunter_limit*100:.0f}%)")
+			
+			if is_real and hunter_prob < hunter_limit:
+				logger.warning(f"❌ [AI Hunter Filter] {stk_cd}: 급등 확률 미달로 신규 매수 거절")
+				return False
+		except Exception as e:
+			logger.warning(f"⚠️ [AI Hunter] 예측 실패(Pass): {e}")
 	
 	# [Math Probability Filter] 수학적 기대 승률 체크
 	from math_analyzer import get_win_probability
@@ -364,6 +410,12 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	
 	# 설정값 로드
 	min_prob = float(get_setting('math_min_win_rate', 0.55)) # 최소 승률 55%
+	
+	# [Time-Adaptive Threshold] 오후 14시 이후에는 문턱을 대폭 상향 (실전 모드만 적용)
+	if current_mode == "Real" and now_hm >= 1400:
+		logger.info("⏰ [Time-Adaptive] 14시 이후 매수 기준 상향 (55% -> 70%)")
+		min_prob = 0.70 # 무조건 70% 이상의 기대 승률 종목만 진입
+
 	min_count = int(get_setting('math_min_sample_count', 5))  # 최소 표본 5건
 	
 	# [Fix] rsi_1m 또는 win_prob가 None인 경우를 위한 안전한 포맷팅
