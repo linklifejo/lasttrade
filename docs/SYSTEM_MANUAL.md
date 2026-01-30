@@ -138,6 +138,7 @@ graph TD
 4.  **장 마감**:
     *   보유 종목 일괄 청산 (설정에 따라).
     *   `learn_daily.py`: 하루 매매 복기 및 AI 학습 (15:40).
+    *   **Incremental Learning (증분 학습)**: AI 학습의 효율성을 위해, 전체 과거 데이터를 매번 재학습하는 비효율을 제거하고 **기존 모델(`DL_stock_model.pth`)에 최신 데이터(최근 2일 + 당일 분봉)만 추가 학습**하는 방식을 채택한다.
     *   **Logic Evolution (Full-Auto)**: 성과 분석 결과에 따라 `logic_evolver.py`가 코드를 자동 패치.
     *   자동 종료.
 

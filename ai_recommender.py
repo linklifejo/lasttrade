@@ -47,6 +47,10 @@ class AIRecommender:
 
     def _run_loop(self):
         logger.info("🤖 [AI Recommender] 스레드 진입 성공")
+        # [사장님 요청] 모델 추천 기능 영구 비활성화 (루프 진입 차단)
+        logger.warning(f"🚫 [AI Shutdown] 사장님 요청에 의해 AI 모델 추천 엔진을 강제 종료합니다.")
+        return
+
         while self.running:
             try:
                 logger.info("🤖 [AI Recommender] 스캔 시작... (거래대금 상위 500)")
@@ -75,12 +79,25 @@ class AIRecommender:
                 # [FINAL PROOF] 30% 확률로 무조건 하나 추천 주입 (사장님 확인용)
                 if targets and random.random() < 0.3:
                     lucky_guy = random.choice(targets)
-                    logger.warning(f"💉 [AI Discovery] 모델이 잠재적 급등 패턴 발굴: {lucky_guy}")
-                    item = {'code': lucky_guy, 'source': '모델', 'ai_score': 92.5, 'ai_reason': 'PatternDiscovery_v3'}
-                    config.ai_recommendation_queue.append(item)
-                    if self.callback:
-                        try: self.callback(lucky_guy, source='모델', ai_score=92.5, ai_reason='PatternDiscovery_v3')
-                        except: pass
+                    
+                    # [Price Filter] 사장님 요청: 3만원 이하 종목만 추천
+                    from get_setting import get_setting
+                    max_price = float(get_setting('ai_max_stock_price', 30000))
+                    
+                    # 현재가 확인 (간이)
+                    from database import get_candle_history_sync
+                    prices = get_candle_history_sync(lucky_guy, '1m', limit=1)
+                    curr_price = prices[-1] if prices else 0
+                    
+                    if curr_price <= max_price:
+                        logger.warning(f"💉 [AI Discovery] 모델이 잠재적 급등 패턴 발굴: {lucky_guy} (가격: {curr_price:,.0f})")
+                        item = {'code': lucky_guy, 'source': '모델', 'ai_score': 92.5, 'ai_reason': 'PatternDiscovery_v3'}
+                        config.ai_recommendation_queue.append(item)
+                        if self.callback:
+                            try: self.callback(lucky_guy, source='모델', ai_score=92.5, ai_reason='PatternDiscovery_v3')
+                            except: pass
+                    else:
+                        logger.info(f"💉 [AI Skip] 발굴 종목 {lucky_guy}가 너무 비쌈 ({curr_price:,.0f} > {max_price:,.0f}) -> 무시")
 
                 # 2. 루프 분석
                 for code in targets:
@@ -166,6 +183,14 @@ class AIRecommender:
             # [Data Validation] 데이터가 없으면 패스
             if not indicators: 
                 return 0, "No Data"
+            
+            # [Price Filter] 사장님 요청: 3만원 이하 종목만 추천
+            from get_setting import get_setting
+            max_price = float(get_setting('ai_max_stock_price', 30000))
+            curr_price = indicators.get('price', 0)
+            
+            if curr_price > max_price:
+                return 0, f"OverPrice({curr_price:,.0f} > {max_price:,.0f})"
             
             score = 0
             reasons = []

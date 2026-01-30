@@ -53,32 +53,44 @@ class HunterTransformer(nn.Module):
 
 # [Memory Safe Dataset] 스트리밍 방식
 class StreamingStockDataset(IterableDataset):
-    def __init__(self, db_path, table_name, window_size, horizon, target_rise):
+    def __init__(self, db_path, table_name, window_size, horizon, target_rise, recent_days=1):
         self.db_path = db_path
         self.table_name = table_name
         self.window_size = window_size
         self.horizon = horizon
         self.target_rise = target_rise
+        self.recent_days = recent_days # [New] 최근 며칠치 학습할지
         self.codes = self._get_codes()
 
     def _get_codes(self):
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute(f"SELECT DISTINCT code FROM {self.table_name}")
+            # [Optimization] 최근 데이터가 있는 종목만 조회하여 속도 향상
+            # (sqlite의 date 함수 사용. 실행 환경의 로컬 타임존 이슈가 있을 수 있으니 여유있게)
+            query = f"SELECT DISTINCT code FROM {self.table_name} WHERE timestamp >= date('now', '-{self.recent_days + 2} days')"
+            cursor.execute(query)
             codes = [r[0] for r in cursor.fetchall()]
             conn.close()
+            if not codes: 
+                # 만약 최근 데이터가 없으면 혹시 모르니 전체 조회 (Fallback)
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT DISTINCT code FROM {self.table_name}")
+                codes = [r[0] for r in cursor.fetchall()]
+                conn.close()
             return codes
         except:
             return []
 
     def _process_code_data(self, code):
-        """종목 하나씩 처리"""
+        """종목 하나씩 처리 (최근 데이터 위주)"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # 1. 데이터 조회 (메모리 부담 적음 - 종목 1개니까)
-        query = f"SELECT * FROM {self.table_name} WHERE code = '{code}' ORDER BY timestamp"
+        # [Incremental Learning] 최근 N일 + 윈도우 확보용 버퍼(2일)
+        query = f"SELECT * FROM {self.table_name} WHERE code = '{code}' AND timestamp >= date('now', '-{self.recent_days + 2} days') ORDER BY timestamp"
         try:
             cursor.execute(query)
             rows = cursor.fetchall()
@@ -154,6 +166,16 @@ def train():
     logger.info(f"💻 Device: {device}")
 
     model = HunterTransformer(input_dim=5).to(device)
+    
+    # [수정] 1. 기존 모델 로드 (이어서 학습)
+    if os.path.exists(MODEL_PATH):
+        try:
+            # CPU/GPU 호환성 고려하여 map_location 사용
+            model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+            logger.info(f"💾 기존 모델 로드 성공: {MODEL_PATH} (이어서 학습합니다)")
+        except Exception as e:
+            logger.warning(f"⚠️ 기존 모델 로드 실패 (새로 시작): {e}")
+
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.0001)
 

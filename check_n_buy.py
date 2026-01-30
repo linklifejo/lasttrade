@@ -40,7 +40,9 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	
 	source_tag = f"[{source}]"
 	if source == '모델':
-		source_tag = f"[🤖AI추천 {ai_score}점]"
+		# source_tag = f"[🤖AI추천 {ai_score}점]"
+		logger.warning(f"🚫 [AI Block] {stk_cd}: AI 추천 종목 매수는 차단되었습니다 (사장님 요청)")
+		return False
 	else:
 		source_tag = f"[{source}]"
 		
@@ -387,9 +389,11 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	except Exception as e:
 		logger.warning(f"⚠️ 60분봉 컨텍스트 획득 실패: {e}")
 
-	# [AI Weight Tuning] 학습된 추세별 가중치(60분봉) 반영 (사용자 요청: 비중 조절 관여)
+	# [AI Weight Tuning] 학습된 추세별 가중치(60분봉) 반영
+	# [중요] 사장님 지침: 모델의 직접 매수 추천은 막았으나, 판단(비중 조절)에는 관여해야 함.
 	try:
 		from database_helpers import get_db_connection
+		# AI 모델 가중치 적용: 검색식 종목 등 모든 매수에 대해 60분봉 추세 및 학습된 통계를 바탕으로 비중을 조절함.
 		with get_db_connection() as conn:
 			cursor = conn.execute("SELECT key, value FROM learned_weights")
 			db_weights = {r['key']: r['value'] for r in cursor.fetchall()}
