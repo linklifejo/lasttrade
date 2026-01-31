@@ -17,7 +17,9 @@ class TechnicalJudge:
 
     @staticmethod
     def judge_buy(code):
-        """매수 적합성 판독"""
+        """매수 적합성 판독 (설정창 팩터 연동 버전)"""
+        from get_setting import get_setting
+        
         indicators = get_technical_indicators(code, '1m')
         if not indicators:
             return True, "데이터 부족으로 기본 통과" # 데이터가 아직 안 쌓였으면 일단 통과
@@ -25,21 +27,25 @@ class TechnicalJudge:
         score = 0
         reasons = []
         
+        # 설정 로드
+        overbought_disp = float(get_setting('tj_overbought_disparity', 105.0))
+        oversold_disp = float(get_setting('tj_oversold_disparity', 98.0))
+        
         # 2. 이격도 체크 (단기 과열 여부)
         disp5 = indicators['disparity_5']
-        if disp5 > 105: # MA5보다 5% 이상 높으면 추격 매수 위험
-            score -= 20
+        if disp5 > overbought_disp: # MA5보다 너무 높으면 추격 매수 위험
+            score -= int(get_setting('tj_score_overbought', 20))
             reasons.append(f"단기 과열(MA5 이격 {disp5:.1f}%)")
-        elif disp5 < 98: # 눌림목 가능성
-            score += 15
+        elif disp5 < oversold_disp: # 눌림목 가능성
+            score += int(get_setting('tj_score_oversold', 15))
             reasons.append(f"눌림목 구간(MA5 이격 {disp5:.1f}%)")
             
         # 3. 추세 체크
         if indicators['trend'] == "UP":
-            score += 15
+            score += int(get_setting('tj_score_trend_up', 15))
             reasons.append("정배열 추세")
         else:
-            score -= 10
+            score -= int(get_setting('tj_score_trend_down', 10))
             reasons.append("역배열/하락 추세")
             
         # 최종 결정 (시간 적응형 문턱 적용)
@@ -49,12 +55,16 @@ class TechnicalJudge:
         now = datetime.datetime.now()
         current_mode = get_current_api_mode()
         
-        threshold = 20 # 기본 문턱
+        base_threshold = int(get_setting('tj_threshold_base', 20))
+        afternoon_threshold = int(get_setting('tj_threshold_afternoon', 40))
+        afternoon_hour = int(get_setting('tj_afternoon_hour', 14))
         
-        # [Time-Adaptive] 키움 실전(Real) 모드에서만 14:00 이후 문턱을 40점으로 상향 (2배 엄격)
-        if current_mode == "Real" and now.hour >= 14:
-            threshold = 40
-            logger.info(f"⏰ [Time-Adaptive] 14시 실전 모드 판독 문턱 상향 적용 ({threshold}점)")
+        threshold = base_threshold
+        
+        # [Time-Adaptive] 키움 실전(Real) 모드에서만 오후 특정 시간 이후 문턱을 상향
+        if current_mode == "Real" and now.hour >= afternoon_hour:
+            threshold = afternoon_threshold
+            logger.info(f"⏰ [Time-Adaptive] {afternoon_hour}시 이후 필터 강화 적용 ({threshold}점)")
 
         passed = score >= threshold
         

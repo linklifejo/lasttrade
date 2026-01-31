@@ -203,9 +203,9 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 			logger.info(f"[CheckSell] {stock_code} ({stock_name}): {elapsed_str}PL={pl_rt}%, Step={cur_step}차, Qty={qty}주, Weight={filled_ratio*100:.1f}%")
 			
 			# [Safety] 재시작 직후 안전장치 (Smart Warm-up)
-			# 수익률이 -5%보다 좋으면(-1%, -3% 등) 60초간 매도 유예 (시장 상황 파악 및 오매도 방지)
-			# 단, 이미 -5% 이하로 폭락 중인 종목(위험군)은 유예 없이 즉시 매도 체크 진행
-			if (time.time() - MODULE_LOAD_TIME < 60) and (pl_rt > -5.0):
+			warmup_limit = int(cached_setting('warmup_seconds', 60))
+			max_risk_limit = float(cached_setting('max_step_risk_limit', -4.0))
+			if (time.time() - MODULE_LOAD_TIME < warmup_limit) and (pl_rt > max_risk_limit):
 				continue
 
 			# [Time-Cut 설정]
@@ -317,52 +317,82 @@ def chk_n_sell(token=None, held_since=None, my_stocks=None, deposit_amt=None, ou
 
 			# 2. [조기 손절 / MAX 손절 / AI 리스크 관리]
 			if not should_sell and single_strategy == "WATER":
-				# (1) AI 리스크 판단 (조기 손절 포함)
+				# (1) 리스크 판단 (사용자 원칙 및 AI 판독 포함)
 				from analyze_tools import get_rsi_for_timeframe as get_rsi
 				rsi_1m = get_rsi(stock_code, '1m') if rsi_1m is None else rsi_1m
 				
-				if rsi_1m is not None:
-					risk_action, risk_reason = evaluate_risk_strength(rsi_1m, pl_rt, cur_step)
-					
-					if risk_action == 'FULL_SELL':
-						should_sell = True
-						sell_reason = risk_reason
-						logger.warning(f"✂️ [AI FULL SELL] {stock_name}: {risk_reason}")
-					# [AI 리스크 매도 제어] 
-					# 1. 한 루프(chk_n_sell 루프) 내 중복 매도 방지: stock_code not in partially_sold_codes
-					# 2. 최근 분할 매도 이력이 있는 경우 5분간 추가 매도 유보 (Cascade 방지): ai_partial_sold_history 체크
-					last_ai_sell = ai_partial_sold_history.get(stock_code, 0)
-					is_cooldown = (time.time() - last_ai_sell < 300) # 5분 쿨다운
-					
-					if risk_action == 'PARTIAL_SELL' and stock_code not in partially_sold_codes and not is_cooldown and qty >= 2:
-						sell_qty = qty // 2
-						if sell_qty > 0:
-							logger.info(f"⚖️ [AI 리스크 관리] {stock_name}: {risk_reason} -> {sell_qty}주(50%) 리스크 조절 매도")
-							final_code = stock_code.replace('A', '')
-							res_code, res_msg = sell_stock(final_code, sell_qty, token=token)
-							
-							if str(res_code) in ['0', 'SUCCESS']:
-								partially_sold_codes.add(stock_code)
-								ai_partial_sold_history[stock_code] = time.time() # 전역 히스토리에 기록
-								tel_send(f"⚖️ [AI 리스크 관리] {stock_name}: {risk_reason} ({sell_qty}주 비중축소)")
-								speak(f"리스크 관리 차원에서 {stock_name} 종목의 비중을 축소합니다.")
-								qty -= sell_qty
-								stock['rmnd_qty'] = qty
-								try:
-									from database_trading_log import log_sell_to_db
-									trade_source = stock.get('trade_type', '-')
-									log_sell_to_db(stock_code, stock_name, sell_qty, cur_prc_val, pl_rt, f"AI리스크({risk_reason})", mode_key, trade_source)
-								except: pass
-							else:
-								logger.error(f"❌ [AI 리스크 매도] 실패: {res_msg}")
-
-				# (2) 전역 손절 (-10% 등) - AI 판단과 별개로 최후의 보루
-				GLOBAL_SL_VAL = float(cached_setting('global_loss_rate', -10.0))
-				if not should_sell and pl_rt <= GLOBAL_SL_VAL:
+				# RSI가 None이라도 사용자 원칙(MAX -4%)은 작동해야 함
+				risk_action, risk_reason = evaluate_risk_strength(rsi_1m, pl_rt, cur_step)
+				
+				if risk_action == 'FULL_SELL':
 					should_sell = True
-					sell_reason = f"전역손절({step_info}/{pl_rt}%)"
-					logger.warning(f"🚨 [전역 손절] {stock_name}: {pl_rt}% <= {GLOBAL_SL_VAL}%")
-					speak(f"긴급 상황 발생. {stock_name} 종목이 전역 손절 기준에 도달하여 긴급 매도합니다.")
+					sell_reason = risk_reason
+					logger.warning(f"✂️ [AI FULL SELL] {stock_name}: {risk_reason}")
+				
+				# [AI 리스크 매도 제어] 
+				# 1. 한 루프(chk_n_sell 루프) 내 중복 매도 방지: stock_code not in partially_sold_codes
+				# 2. 최근 분할 매도 이력이 있는 경우 추가 매도 유보: ai_partial_sold_history 체크
+				last_ai_sell = ai_partial_sold_history.get(stock_code, 0)
+				ai_sell_cooldown = int(cached_setting('ai_partial_sell_cooldown_seconds', 300))
+				is_cooldown = (time.time() - last_ai_sell < ai_sell_cooldown)
+				
+				if not should_sell and risk_action == 'PARTIAL_SELL' and stock_code not in partially_sold_codes and not is_cooldown and qty >= 2:
+					sell_qty = qty // 2
+					if sell_qty > 0:
+						logger.info(f"⚖️ [리스크 관리] {stock_name}: {risk_reason} -> {sell_qty}주(50%) 비중 축소 실행")
+						final_code = stock_code.replace('A', '')
+						res_code, res_msg = sell_stock(final_code, sell_qty, token=token)
+						
+						if str(res_code) in ['0', 'SUCCESS']:
+							partially_sold_codes.add(stock_code)
+							ai_partial_sold_history[stock_code] = time.time() # 전역 히스토리에 기록
+							# 사유를 멘트로 명확히 전달
+							tel_send(f"⚠️ [비상 대응] {stock_name}: {risk_reason} (절반 매도 완료)")
+							speak(f"비상 상황입니다. {stock_name} 종목이 손실률 {pl_rt:.1f}퍼센트에 도달하여 비중을 50% 축소했습니다.")
+							
+							qty -= sell_qty
+							stock['rmnd_qty'] = qty
+							try:
+								from database_trading_log import log_sell_to_db
+								trade_source = stock.get('trade_type', '-')
+								log_sell_to_db(stock_code, stock_name, sell_qty, cur_prc_val, pl_rt, f"비상대응({risk_reason})", mode_key, trade_source)
+							except: pass
+							
+							# [핵심] 분할 매도를 이미 했다면, 이번 루프에서는 '전역 손절'로 넘어가지 않게 보호!
+							# -11% 상황 등에서 분할 매도 후 바로 전량 매도되는 현상 방지
+							continue 
+						else:
+							logger.error(f"❌ [리스크 매도] 실패: {res_msg}")
+
+				# (2) 최종 강제 손절 (MAX 단계에서만 적용되는 사용자 원칙)
+				try:
+					# [Safety] 전역 손절 기본값을 -10%에서 -7%로 하향 조정 (사용자 고통 경감)
+					GLOBAL_SL_VAL = float(cached_setting('global_loss_rate', -7.0))
+					if GLOBAL_SL_VAL > 0: GLOBAL_SL_VAL = -GLOBAL_SL_VAL
+				except:
+					GLOBAL_SL_VAL = -7.0
+				
+				# [사용자 대원칙 반영] 
+				# 1. '비상 전역 손절(-7%)'은 전 단계 공통 적용 (김정은급 악재 방어)
+				# 2. '설정 손절(-5%)'은 오직 MAX 단계(is_actually_max)일 때만 적용!
+				is_system_sl = (pl_rt <= GLOBAL_SL_VAL) # 최후의 보루
+				is_user_sl = (is_actually_max and pl_rt <= SL_RATE) # MAX 단계에서만 -5% 적용
+				
+				if not should_sell and (is_system_sl or is_user_sl):
+					should_sell = True
+					if is_system_sl:
+						reason_type = "비상전역손절"
+						log_msg = f"🚨 [비상 상황] {stock_name}: 전역 감시선({GLOBAL_SL_VAL}%) 돌파! (김정은급 악재 판단)"
+						v_msg = f"비상 상황 발생! {stock_name} 종목이 손실률 {pl_rt:.1f}퍼센트에 도달하여 시스템 전역 손절을 실행합니다. 모든 물량을 긴급 정리합니다."
+					else:
+						reason_type = "최후보루손절"
+						log_msg = f"🛡️ [보루 돌파] {stock_name}: MAX단계 최종 손절선({SL_RATE}%) 도달"
+						v_msg = f"최후의 보루 돌파. {stock_name} 종목이 손실률 {pl_rt:.1f}퍼센트에 도달하여 물량을 모두 정리합니다."
+					
+					sell_reason = f"{reason_type}({step_info}/{pl_rt}%)"
+					logger.warning(log_msg)
+					speak(v_msg)
+					tel_send(f"🚨 {log_msg} (수익률: {pl_rt}%)")
 
 			# 3. [AI 분할 매도] (New)
 			if not should_sell and stock_code not in partially_sold_codes:

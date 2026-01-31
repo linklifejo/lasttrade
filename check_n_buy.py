@@ -65,7 +65,7 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 					is_held = True
 					break
 	
-	buy_cooldown = 60 # 60초 (재진입 방지)
+	buy_cooldown = int(get_setting('buy_rebuy_cooldown_seconds', 60)) # 60초 (재진입 방지)
 	last_time = last_buy_times.get(stk_cd, 0)
 	
 	# 보유 중이지 않은 신규 진입 종목만 쿨타임 적용
@@ -237,20 +237,26 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	current_mode = get_current_api_mode()
 	
 	if current_mode == "Real":
-		if now_hm >= 1450: # 14:50 ~ 장 마감: 신규 진입 절대 금지
+		limit_h3 = int(get_setting('entry_limit_hour_3', 1450)) # 14:50
+		limit_h2 = int(get_setting('entry_limit_hour_2', 1400)) # 14:00
+		limit_h1 = int(get_setting('entry_limit_hour_1', 1300)) # 13:00
+		
+		if now_hm >= limit_h3: # 장 마감 직전: 신규 진입 절대 금지
 			if current_holding is None:
-				logger.warning(f"⏰ [Time-Adaptive] 14:50 이후 신규 진입 금지 ({stk_cd})")
+				logger.warning(f"⏰ [Time-Adaptive] {limit_h3} 이후 신규 진입 금지 ({stk_cd})")
 				return False
-		elif now_hm >= 1400: # 14:00 ~ 14:50: 대장주 1종목만 허용
-			if my_stocks_count >= 1 and current_holding is None:
-				logger.warning(f"⏰ [Time-Adaptive] 14시 이후 슬롯 1개로 제한 (현재 {my_stocks_count}개 보유 중)")
+		elif now_hm >= limit_h2: # 14:00 이후: 대장주 1종목만 허용
+			limit_slot_2 = int(get_setting('entry_limit_slot_2', 1))
+			if my_stocks_count >= limit_slot_2 and current_holding is None:
+				logger.warning(f"⏰ [Time-Adaptive] {limit_h2} 이후 슬롯 {limit_slot_2}개로 제한 (현재 {my_stocks_count}개 보유 중)")
 				return False
-			dynamic_max_stocks = 1
-		elif now_hm >= 1300: # 13:00 ~ 14:00: 종목 압축 3개로 제한
-			if my_stocks_count >= 3 and current_holding is None:
-				logger.info(f"⏰ [Time-Adaptive] 13시 이후 슬롯 3개로 제한 (현재 {my_stocks_count}개 보유 중)")
+			dynamic_max_stocks = limit_slot_2
+		elif now_hm >= limit_h1: # 13:00 이후: 종목 압축
+			limit_slot_1 = int(get_setting('entry_limit_slot_1', 3))
+			if my_stocks_count >= limit_slot_1 and current_holding is None:
+				logger.info(f"⏰ [Time-Adaptive] {limit_h1} 이후 슬롯 {limit_slot_1}개로 제한 (현재 {my_stocks_count}개 보유 중)")
 				return False
-			dynamic_max_stocks = min(setting_target_cnt, 3)
+			dynamic_max_stocks = min(setting_target_cnt, limit_slot_1)
 
 	# 최종 사용할 target_cnt (코어 로직 호환성 유지)
 	# [Logic] 신규 진입 판정은 dynamic_max_stocks를 쓰고, 금액 배분은 안전을 위해 setting_target_cnt를 사용
@@ -334,7 +340,8 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 		if balance <= 0:
 			# API가 deposit만 0으로 주는 경우 또는 키 매핑 실패 시 역산 시도
 			estimated_deposit = net_asset - stock_val
-			if estimated_deposit > 50000: # 5만원 이상이면 유효한 예수금으로 인정
+			min_depo_threshold = int(get_setting('min_deposit_threshold', 50000))
+			if estimated_deposit > min_depo_threshold: # 5만원 이상이면 유효한 예수금으로 인정
 				logger.warning(f"[Balance Fix] 잔고 0원 -> 추정 예수금({estimated_deposit:,.0f}원) 사용")
 				balance = estimated_deposit
 			else:
@@ -411,10 +418,13 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 	# 설정값 로드
 	min_prob = float(get_setting('math_min_win_rate', 0.55)) # 최소 승률 55%
 	
-	# [Time-Adaptive Threshold] 오후 14시 이후에는 문턱을 대폭 상향 (실전 모드만 적용)
-	if current_mode == "Real" and now_hm >= 1400:
-		logger.info("⏰ [Time-Adaptive] 14시 이후 매수 기준 상향 (55% -> 70%)")
-		min_prob = 0.70 # 무조건 70% 이상의 기대 승률 종목만 진입
+	# [Time-Adaptive Threshold] 오후 특정 시간 이후에는 문턱을 상향 (실전 모드만 적용)
+	afternoon_hour_hm = int(get_setting('math_afternoon_hour_hm', 1400)) # 14:00
+	afternoon_min_prob = float(get_setting('math_afternoon_min_win_rate', 0.70)) # 70%
+	
+	if current_mode == "Real" and now_hm >= afternoon_hour_hm:
+		logger.info(f"⏰ [Time-Adaptive] {afternoon_hour_hm} 이후 매수 기준 상향 ({min_prob*100:.0f}% -> {afternoon_min_prob*100:.0f}%)")
+		min_prob = afternoon_min_prob 
 
 	min_count = int(get_setting('math_min_sample_count', 5))  # 최소 표본 5건
 	
@@ -430,8 +440,9 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 			logger.warning(f"📉 [Math Filter] {stk_cd}: 기대 승률({win_prob*100:.1f}%)이 기준({min_prob*100:.0f}%) 미달하여 매수 취소")
 			return False
 		
-		# 기준 승률(min_prob) 이상일 때, 추가 승률 1%당 5% 비중 확대
-		math_weight = 1.0 + (win_prob - min_prob) * 5.0
+		# 기준 승률(min_prob) 이상일 때, 추가 승률 1%당 설정된 확대 비율 적용
+		win_prob_scaling = float(get_setting('math_win_prob_scaling', 5.0))
+		math_weight = 1.0 + (win_prob - min_prob) * win_prob_scaling
 		
 	# [New] 60분봉 컨텍스트 추가 (숲의 흐름)
 	ctx_60m = {}
@@ -464,8 +475,10 @@ def _chk_n_buy_core(stk_cd, token, current_holdings=None, current_balance_data=N
 				math_weight *= multiplier
 				logger.info(f"📉 [AI Size] 60m 역배열 보정: {multiplier:.2f}x (승률 {specific_win*100:.1f}%)")
 				
-		# 최종 가중치 범위 제한 (0.5 ~ 1.5배)
-		math_weight = max(0.5, min(1.5, math_weight))
+		# 최종 가중치 범위 제한
+		w_min = float(get_setting('math_weight_min', 0.5))
+		w_max = float(get_setting('math_weight_max', 1.5))
+		math_weight = max(w_min, min(w_max, math_weight))
 		logger.info(f"⚖️ [Final AI Weight] 최종 매수 비중 가중치: {math_weight:.2f}x")
 	except Exception as e:
 		logger.warning(f"⚠️ AI 비중 보정 실패: {e}")
